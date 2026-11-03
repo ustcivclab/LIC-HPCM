@@ -106,7 +106,7 @@ def test(args):
         checkpoint = torch.load(ckpt, map_location=device)
         model = net()
         model.eval()
-        model.load_state_dict(checkpoint, strict=True)
+        model.load_state_dict(checkpoint, strict=False)
         model.update(get_scale_table(0.12, 64, args.num))
         model = model.to(device)
 
