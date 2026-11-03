@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from einops import rearrange
 
 from .base import BB as basemodel
-from src.layers import PConvRB, conv2x2_down, deconv2x2_up, DWConvRB, conv1x1, conv4x4_down, deconv4x4_up
+from ..layers import PConvRB, conv2x2_down, deconv2x2_up, DWConvRB, conv1x1, conv4x4_down, deconv4x4_up
 
 class g_a(nn.Module):
     def __init__(self):
@@ -391,7 +391,7 @@ class HPCM(basemodel):
         return y_res, y_q, y_hat, scales_hat
     
     def compress(self, x):
-        from src.entropy_models import ubransEncoder
+        from ..entropy_models import ubransEncoder
         y = self.g_a(x)
         z = self.h_a(y)
         z_res_hat = torch.round(z - self.means_hyper)
@@ -420,7 +420,7 @@ class HPCM(basemodel):
         return {"strings": [y_string, z_string], "shape": z_res_hat.size()[2:]}
         
     def decompress(self, strings, shape):
-        from src.entropy_models import ubransDecoder
+        from ..entropy_models import ubransDecoder
         device = self.quantized_cdf_z.device
         output_size = (1, self.scales_hyper.size(1), *shape)
         indexes_z = self.build_indexes_z(output_size).to(device)

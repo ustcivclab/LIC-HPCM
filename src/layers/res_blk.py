@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch.nn.functional as F
-from src.layers.conv import conv1x1, dwconv3x3, pconv3x3
+from .conv import conv1x1, dwconv3x3, pconv3x3
     
 class DWConvRB(nn.Module):
     def __init__(self, N=192, mlp_ratio=2, act=nn.LeakyReLU):

@@ -3,8 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-from src.entropy_models.entropy_models import GGM
-from src.utils.utils import _update_registered_buffer
+from ..entropy_models.entropy_models import GGM
+from ..utils.utils import _update_registered_buffer
 
 class BB(nn.Module):
     def __init__(self, N):
