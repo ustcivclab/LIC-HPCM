@@ -20,10 +20,9 @@ class DWConvRB(nn.Module):
 class PConvRB(nn.Module):
     def __init__(self, N=192, partial_ratio=4, mlp_ratio=2, act=nn.LeakyReLU):
         super().__init__()
-        N1 = N // partial_ratio
         middle_ch = N * mlp_ratio
         self.branch = nn.Sequential(
-            pconv3x3(N, N1),
+            pconv3x3(N, partial_ratio),
             conv1x1(N, middle_ch),
             act(inplace=True),
             conv1x1(middle_ch, N),

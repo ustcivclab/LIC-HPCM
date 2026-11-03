@@ -26,16 +26,15 @@ def dwconv3x3(ch):
     return nn.Conv2d(ch, ch, kernel_size=3, stride=1, padding=1, groups=ch)
 
 class pconv3x3(nn.Module):
-    def __init__(self, N, N1):
+    def __init__(self, N, partial_ratio=4):
         super().__init__()
         self.N = N
-        self.N1 = N1
+        self.partial_ratio = partial_ratio
+        self.N1 = N // partial_ratio
         self.pconv = nn.Conv2d(self.N1, self.N1, 3, 1, 1)
     
     def forward(self, x):
-        x1, x2 = torch.split(x, [self.N1, self.N-self.N1], dim=1)
-        x1 = self.pconv(x1)
-        x = torch.cat((x1, x2), 1)
-        return x   
+        xs = torch.chunk(x, self.partial_ratio, 1)
+        return torch.cat((self.pconv(xs[0]),) + xs[1:], 1)
     
     
