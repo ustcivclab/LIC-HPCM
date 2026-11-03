@@ -36,17 +36,6 @@ This implementation requires Python 3.8 and PyTorch 1.12.
    ```
    pip install -r requirements.txt
    ```
-   
-2. Compile the arithmetic coder
-
-   If you need real bitstream writing, please compile the arithmetic coder using the following commands. The compiled files are located in the directories `src/entropy_models/entropy_coders/unbounded_rans/build`.
-
-   ```
-   cd src/entropy_models/entropy_coders/unbounded_rans
-   sh setup.sh
-   ```
-   
-   We provide the arithmetic coder for Linux, Python 3.8, specifically `_CXX.cpython-38-x86_64-linux-gnu.so` and `unbounded_ans.cpython-38-x86_64-linux-gnu.so`.
 
 ## Usage
 

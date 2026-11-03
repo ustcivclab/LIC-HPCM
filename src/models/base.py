@@ -102,21 +102,21 @@ class BB(nn.Module):
     @staticmethod
     def compress_symbols(symbols, indexes, quantized_cdf, cdf_length, offset, encoder):
         encoder.encode_with_indexes(
-            symbols.reshape(-1).int().cpu().numpy(),
-            indexes.reshape(-1).int().cpu().numpy(),
-            quantized_cdf,
-            cdf_length,
-            offset
+            symbols.reshape(-1).int().tolist(),
+            indexes.reshape(-1).int().tolist(),
+            [row[:int(l)].tolist() for row, l in zip(quantized_cdf, cdf_length)],
+            cdf_length.tolist(),
+            offset.tolist()
         )
         return True
     
     @staticmethod
     def decompress_symbols(indexes, quantized_cdf, cdf_length, offset, decoder):
         values = decoder.decode_stream(
-            indexes.reshape(-1).int().cpu().numpy(),
-            quantized_cdf,
-            cdf_length,
-            offset
+            indexes.reshape(-1).int().tolist(),
+            [row[:int(l)].tolist() for row, l in zip(quantized_cdf, cdf_length)],
+            cdf_length.tolist(),
+            offset.tolist()
         )
         outputs = torch.tensor(
             values, device=indexes.device, dtype=torch.float32

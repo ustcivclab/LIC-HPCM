@@ -4,7 +4,7 @@ import torch.nn as nn
 
 from .bound_ops import LowerBound
 
-from ._CXX import pmf_to_quantized_cdf as _pmf_to_quantized_cdf
+from compressai._CXX import pmf_to_quantized_cdf as _pmf_to_quantized_cdf
 
 def pmf_to_quantized_cdf(pmf, precision: int = 16):
     cdf = _pmf_to_quantized_cdf(pmf.tolist(), precision)
