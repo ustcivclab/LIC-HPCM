@@ -158,14 +158,7 @@ class HPCM(basemodel):
         y = self.g_a(x)
         z = self.h_a(y)
         
-        if training:
-            z_res = z - self.means_hyper
-            z_hat = self.ste_round(z_res) + self.means_hyper
-            z_likelihoods = self.entropy_estimation(self.add_noise(z_res), self.scales_hyper)
-        else:
-            z_res_hat = torch.round(z - self.means_hyper)
-            z_hat = z_res_hat + self.means_hyper
-            z_likelihoods = self.entropy_estimation(z_res_hat, self.scales_hyper)   
+        z_hat, z_likelihoods = self.entropy_bottleneck(z)
 
         params = self.h_s(z_hat)
         y_res, y_q, y_hat, scales_y = self.forward_hpcm(y, params, 
@@ -177,11 +170,7 @@ class HPCM(basemodel):
 
         x_hat = self.g_s(y_hat)
         
-        if training:
-            y_likelihoods = self.entropy_estimation(self.add_noise(y_res), scales_y)
-        else:
-            y_res_hat = torch.round(y_res)
-            y_likelihoods = self.entropy_estimation(y_res_hat, scales_y) 
+        y_likelihoods = self.entropy_conditional.likelihoods(y_res, scales_y)
         
         return {
             "x_hat": x_hat,
@@ -343,59 +332,44 @@ class HPCM(basemodel):
         return y_res, y_q, y_hat, scales_hat
     
     def compress(self, x):
-        from ..entropy_models import ubransEncoder
         y = self.g_a(x)
         z = self.h_a(y)
-        z_res_hat = torch.round(z - self.means_hyper)
-        indexes_z = self.build_indexes_z(z_res_hat.size())
-        
-        encoder_z = ubransEncoder()
-        self.compress_symbols(z_res_hat, indexes_z, self.quantized_cdf_z.cpu().numpy(), self.cdf_length_z.cpu().numpy(), self.offset_z.cpu().numpy(), encoder_z)
-        z_string = encoder_z.flush()
-        
-        z_hat = z_res_hat + self.means_hyper
+
+        z_strings = self.entropy_bottleneck.compress(z)
+        z_hat = self.entropy_bottleneck.decompress(z_strings, z.size()[-2:])
 
         params = self.h_s(z_hat)
-        y_q_write_list, scales_hat_write_list = self.compress_hpcm(y, params, 
-                                                self.y_spatial_prior_adaptor_list_s1, self.y_spatial_prior_s1_s2, 
-                                                self.y_spatial_prior_adaptor_list_s2, self.y_spatial_prior_s1_s2, 
-                                                self.y_spatial_prior_adaptor_list_s3, self.y_spatial_prior_s3, 
-                                                self.adaptive_params_list, self.context_net
-                                                )
+        y_q_write_list, scales_hat_write_list = self.compress_hpcm(
+            y, params,
+            self.y_spatial_prior_adaptor_list_s1, self.y_spatial_prior_s1_s2,
+            self.y_spatial_prior_adaptor_list_s2, self.y_spatial_prior_s1_s2,
+            self.y_spatial_prior_adaptor_list_s3, self.y_spatial_prior_s3,
+            self.adaptive_params_list, self.context_net,
+        )
 
-        encoder_y = ubransEncoder()
-        for i in range(len(y_q_write_list)):
-            indexes_w = self.build_indexes_conditional(scales_hat_write_list[i])
-            self.compress_symbols(y_q_write_list[i], indexes_w, self.quantized_cdf_y.cpu().numpy(), self.cdf_length_y.cpu().numpy(), self.offset_y.cpu().numpy(), encoder_y)
-        y_string = encoder_y.flush()
-        
-        return {"strings": [y_string, z_string], "shape": z_res_hat.size()[2:]}
-        
+        indexes = [self.entropy_conditional.build_indexes(s) for s in scales_hat_write_list]
+        y_string = self.entropy_conditional.compress_parts(y_q_write_list, indexes)
+
+        return {"strings": [y_string, *z_strings], "shape": z.size()[-2:]}
+
     def decompress(self, strings, shape):
-        from ..entropy_models import ubransDecoder
-        device = self.quantized_cdf_z.device
-        output_size = (1, self.scales_hyper.size(1), *shape)
-        indexes_z = self.build_indexes_z(output_size).to(device)
-        
-        decoder_z = ubransDecoder()
-        decoder_z.set_stream(strings[1])
-        z_res_hat = self.decompress_symbols(indexes_z, self.quantized_cdf_z.cpu().numpy(), self.cdf_length_z.cpu().numpy(), self.offset_z.cpu().numpy(), decoder_z)
-        z_hat = z_res_hat+self.means_hyper
-        
+        z_strings = strings[1:]
+        z_hat = self.entropy_bottleneck.decompress(z_strings, shape)
+
         params = self.h_s(z_hat)
-        decoder_y = ubransDecoder()
-        decoder_y.set_stream(strings[0])
-        y_hat = self.decompress_hpcm(params, 
-                                            self.y_spatial_prior_adaptor_list_s1, self.y_spatial_prior_s1_s2, 
-                                            self.y_spatial_prior_adaptor_list_s2, self.y_spatial_prior_s1_s2, 
-                                            self.y_spatial_prior_adaptor_list_s3, self.y_spatial_prior_s3, 
-                                            self.adaptive_params_list, self.context_net, decoder_y
-                                            )
-    
-        x_hat = self.g_s(y_hat).clamp_(0,1)
-        
+        stream = self.entropy_conditional.open_stream(strings[0])
+        y_hat = self.decompress_hpcm(
+            params,
+            self.y_spatial_prior_adaptor_list_s1, self.y_spatial_prior_s1_s2,
+            self.y_spatial_prior_adaptor_list_s2, self.y_spatial_prior_s1_s2,
+            self.y_spatial_prior_adaptor_list_s3, self.y_spatial_prior_s3,
+            self.adaptive_params_list, self.context_net, stream,
+        )
+
+        x_hat = self.g_s(y_hat).clamp_(0, 1)
+
         return {"x_hat": x_hat}
-    
+
     def compress_hpcm(self, y, common_params, 
                               y_spatial_prior_adaptor_list_s1, y_spatial_prior_s1, 
                               y_spatial_prior_adaptor_list_s2, y_spatial_prior_s2, 
@@ -413,7 +387,7 @@ class HPCM(basemodel):
                                 y_spatial_prior_adaptor_list_s1, y_spatial_prior_s1, 
                                 y_spatial_prior_adaptor_list_s2, y_spatial_prior_s2, 
                                 y_spatial_prior_adaptor_list_s3, y_spatial_prior_s3, 
-                                adaptive_params_list, context_net, decoder_y
+                                adaptive_params_list, context_net, stream
                                 ):
         scales, means = common_params.chunk(2,1)
         dtype = means.dtype
@@ -438,8 +412,8 @@ class HPCM(basemodel):
         for i in range(2):
             if i == 0:
                 scales_r = self.combine_for_writing_s1(scales_s1 * mask_list[i])
-                indexes_r = self.build_indexes_conditional(scales_r)
-                y_q_r = self.decompress_symbols(indexes_r, self.quantized_cdf_y.cpu().numpy(), self.cdf_length_y.cpu().numpy(), self.offset_y.cpu().numpy(), decoder_y)
+                indexes_r = self.entropy_conditional.build_indexes(scales_r)
+                y_q_r = self.entropy_conditional.decompress_part(stream, indexes_r)
                 y_hat_curr_step = (torch.cat([y_q_r for _ in range(2)], dim=1) + means_s1) * mask_list[i]
                 y_hat_so_far = y_hat_curr_step
             else:
@@ -447,8 +421,8 @@ class HPCM(basemodel):
                 context_next = y_spatial_prior_s1(y_spatial_prior_adaptor_list_s1[i - 1](params), adaptive_params_list[i - 1])
                 scales, means = context_next.chunk(2, 1)
                 scales_r = self.combine_for_writing_s1(scales * mask_list[i])
-                indexes_r = self.build_indexes_conditional(scales_r)
-                y_q_r = self.decompress_symbols(indexes_r, self.quantized_cdf_y.cpu().numpy(), self.cdf_length_y.cpu().numpy(), self.offset_y.cpu().numpy(), decoder_y)
+                indexes_r = self.entropy_conditional.build_indexes(scales_r)
+                y_q_r = self.entropy_conditional.decompress_part(stream, indexes_r)
                 y_hat_curr_step = (torch.cat([y_q_r for _ in range(2)], dim=1) + means) * mask_list[i]
                 y_hat_so_far = y_hat_so_far + y_hat_curr_step
         
@@ -474,8 +448,8 @@ class HPCM(basemodel):
             context_next = y_spatial_prior_s2(y_spatial_prior_adaptor_list_s2[i - 1](params), adaptive_params_list[i + 1])
             scales, means = context_next.chunk(2, 1)
             scales_r = self.combine_for_writing_s2(scales * mask_list[i])
-            indexes_r = self.build_indexes_conditional(scales_r)
-            y_q_r = self.decompress_symbols(indexes_r, self.quantized_cdf_y.cpu().numpy(), self.cdf_length_y.cpu().numpy(), self.offset_y.cpu().numpy(), decoder_y)
+            indexes_r = self.entropy_conditional.build_indexes(scales_r)
+            y_q_r = self.entropy_conditional.decompress_part(stream, indexes_r)
             y_hat_curr_step = (torch.cat([y_q_r for _ in range(4)], dim=1) + means) * mask_list[i]
             y_hat_so_far = y_hat_so_far + y_hat_curr_step
 
@@ -500,8 +474,8 @@ class HPCM(basemodel):
             context_next = y_spatial_prior_s3(y_spatial_prior_adaptor_list_s3[i - 1](params), adaptive_params_list[i + 4])
             scales, means = context_next.chunk(2, 1)
             scales_r = self.combine_for_writing_s3(scales * mask_list[i])
-            indexes_r = self.build_indexes_conditional(scales_r)
-            y_q_r = self.decompress_symbols(indexes_r, self.quantized_cdf_y.cpu().numpy(), self.cdf_length_y.cpu().numpy(), self.offset_y.cpu().numpy(), decoder_y)
+            indexes_r = self.entropy_conditional.build_indexes(scales_r)
+            y_q_r = self.entropy_conditional.decompress_part(stream, indexes_r)
             y_hat_curr_step = (torch.cat([y_q_r for _ in range(8)], dim=1) + means) * mask_list[i]
             y_hat_so_far = y_hat_so_far + y_hat_curr_step
         

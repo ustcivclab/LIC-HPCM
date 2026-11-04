@@ -1,31 +1,30 @@
+"""Generalized-normal (GGM) entropy models on top of CompressAI's `EntropyModel`.
+
+The latent is quantized on an integer grid relative to a per-channel mean, and
+only the residual symbols are arithmetic coded — the same scheme CompressAI's
+`EntropyBottleneck`/`GaussianConditional` implement with a Gaussian/spline
+distribution, here with a generalized normal of shape `beta`.
+"""
+
+from collections.abc import Callable
+
 import scipy.stats
 import torch
-import torch.nn as nn
-
+from compressai.ans import BufferedRansEncoder, RansDecoder
+from compressai.entropy_models import EntropyModel
 from compressai.ops import LowerBound
-from compressai._CXX import pmf_to_quantized_cdf as _pmf_to_quantized_cdf
+from torch import Tensor
+from torchao.quantization.quant_primitives import _Round
 
-def pmf_to_quantized_cdf(pmf, precision: int = 16):
-    cdf = _pmf_to_quantized_cdf(pmf.tolist(), precision)
-    cdf = torch.IntTensor(cdf)
-    return cdf
+ste_round: Callable[[torch.Tensor], torch.Tensor] = _Round.apply
 
-def pmf_to_cdf(pmf, tail_mass, pmf_length, max_length):
-    cdf = torch.zeros(
-        (len(pmf_length), max_length + 2), dtype=torch.int32, device=pmf.device
-    )
-    for i, p in enumerate(pmf):
-        prob = torch.cat((p[: pmf_length[i]], tail_mass[i]), dim=0)
-        _cdf = pmf_to_quantized_cdf(prob)
-        cdf[i, : _cdf.size(0)] = _cdf
-    return cdf
 
 class generalnormalcdf(torch.autograd.Function):
     @staticmethod
     def forward(ctx, beta, y):
-        ctx.absy = torch.pow(torch.abs(y),beta)
+        ctx.absy = torch.pow(torch.abs(y), beta)
         ctx.beta = beta
-        output = (1+torch.sign(y)*torch.special.gammainc(1/beta, ctx.absy))/2
+        output = (1 + torch.sign(y) * torch.special.gammainc(1 / beta, ctx.absy)) / 2
         ctx.device = y.device
         return output
 
@@ -33,72 +32,208 @@ class generalnormalcdf(torch.autograd.Function):
     def backward(ctx, grad_output):
         y = ctx.absy
         beta = ctx.beta
-        y_grad = torch.exp(-y-torch.special.gammaln(1/beta))*beta/2
-        return None, grad_output*y_grad
+        y_grad = torch.exp(-y - torch.special.gammaln(1 / beta)) * beta / 2
+        return None, grad_output * y_grad
 
-class GGM(nn.Module):
-    def __init__(
-        self,
-        beta: float = 1.5,
-        scale_bound: float = 0.12,
-        likelihood_bound: float = 1e-9
-    ):
-        super().__init__()
+
+class GGMEntropyModel(EntropyModel):
+    r"""Base class for the generalized-normal discrete entropy models.
+
+    Args:
+        beta: shape of the generalized normal distribution
+        scale_bound: lower bound applied to every scale, both when computing
+            likelihoods and when building the CDF tables
+        tail_mass: probability mass reserved for the CDF tails
+    """
+
+    def __init__(self, beta: float = 1.5, scale_bound: float = 0.12,
+                 tail_mass: float = 1e-6, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
         self.scale_lower_bound = LowerBound(scale_bound)
-        self.likelihood_lower_bound = LowerBound(likelihood_bound)
-
+        self.tail_mass = float(tail_mass)
         self.register_buffer("beta", torch.Tensor([beta]))
-    
-    def _cdf(self, values):
-        return generalnormalcdf.apply(self.beta, values)
 
-    def _likelihood(self, inputs, scales, means=None):
-        
+    def _standardized_quantile(self, quantile) -> float:
+        return scipy.stats.gennorm.ppf(quantile, float(self.beta))
+
+    def _cdf(self, values: Tensor) -> Tensor:
+        return generalnormalcdf.apply(self.beta.to(values.device), values)
+
+    def _likelihood(self, inputs: Tensor, scales: Tensor,
+                    means: Tensor | None = None) -> Tensor:
         half = float(0.5)
-        if means is not None:
-            values = inputs - means
-        else:
-            values = inputs
+        values = inputs - means if means is not None else inputs
         scales = self.scale_lower_bound(scales)
-        upper = self._cdf((values+half)/scales)
-        lower = self._cdf((values-half)/scales)
-        likelihood = upper - lower
+        upper = self._cdf((values + half) / scales)
+        lower = self._cdf((values - half) / scales)
+        return upper - lower
 
-        return likelihood
+    def likelihood(self, inputs: Tensor, scales: Tensor,
+                   means: Tensor | None = None) -> Tensor:
+        return self.likelihood_lower_bound(self._likelihood(inputs, scales, means))
 
-    def forward(self, inputs, scales, means=None):
-        likelihood = self._likelihood(inputs, scales, means)
-        likelihood = self.likelihood_lower_bound(likelihood)
-        return likelihood
-    
-    def _standardized_quantile(self, quantile):
-        return scipy.stats.gennorm.ppf(quantile, self.beta)
-    
-    def get_quantized_cdf(self, scale_table):
-        device = scale_table.device
-        scale_table = self.scale_lower_bound(scale_table)
+    def quantize_noise(self, inputs: Tensor) -> Tensor:
+        """Training-time stand-in for quantization: the symbol replaced by U(-0.5, 0.5).
 
-        tail_mass = 1e-6
-        multiplier = -self._standardized_quantile(tail_mass / 2)
-        pmf_center = torch.ceil(scale_table * multiplier).int()
+        Not `self.quantize(inputs, "noise")`: compressai draws with
+        `rand_like`, we draw with `uniform_`, and the two are not bitwise equal,
+        so switching would move every training likelihood (and its gradient).
+        """
+        half = float(0.5)
+        return inputs + torch.empty_like(inputs).uniform_(-half, half)
+
+    def _build_tables(self, scales: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+        """Quantized CDFs, one row per scale (channel, or scale-table entry).
+
+        `gammainc` rounds differently on CPU and CUDA, and a CDF is only
+        correct as built on one device, so the tables are always computed on
+        CPU and moved to the module's device afterwards. That keeps `update()`
+        independent of when the model is moved to a GPU. The scale lower bound
+        is applied by value for the same reason: the incoming scales and this
+        module need not share a device.
+        """
+        device = self.beta.device
+        bound = float(self.scale_lower_bound.bound)
+        scales = scales.detach().float().view(-1).clamp_min(bound).cpu()
+
+        multiplier = -self._standardized_quantile(self.tail_mass / 2)
+        pmf_center = torch.ceil(scales * multiplier).int()
         pmf_length = 2 * pmf_center + 1
         max_length = torch.max(pmf_length).item()
 
-        samples = torch.arange(max_length, device=device).int() - pmf_center[:, None]
-        samples = samples.float()
-        samples_scale = scale_table.unsqueeze(1)
-        samples_scale = samples_scale.float()
+        samples = torch.arange(max_length, device=scales.device).int() - pmf_center[:, None]
+        samples_scale = scales.unsqueeze(1)
 
-        upper = self._cdf((samples+0.5) / samples_scale)
-        lower = self._cdf((samples-0.5) / samples_scale)
+        upper = self._cdf((samples + 0.5) / samples_scale)
+        lower = self._cdf((samples - 0.5) / samples_scale)
         pmf = upper - lower
+        tails = lower[:, :1] + (1 - upper[:, -1:])
 
-        tail_mass = lower[:, :1] + (1-upper[:,-1:])
+        quantized_cdf = self._pmf_to_cdf(pmf, tails, pmf_length, max_length)
+        tables = (quantized_cdf, pmf_length + 2, -pmf_center)
+        return tuple(t.to(device) for t in tables)
 
-        quantized_cdf = torch.Tensor(len(pmf_length), max_length + 2)
-        quantized_cdf = pmf_to_cdf(pmf, tail_mass, pmf_length, max_length)
-        offset = -pmf_center
-        cdf_length = pmf_length + 2
-        
-        return quantized_cdf, cdf_length, offset
+    def _apply_tables(self, scales: Tensor) -> None:
+        self._quantized_cdf, self._cdf_length, self._offset = self._build_tables(scales)
+
+
+class GGMEntropyBottleneck(GGMEntropyModel):
+    r"""Entropy bottleneck with a generalized-normal prior over the hyper latent.
+
+    `means` shifts the quantization grid, so `round(x - means)` is coded and
+    `means` is added back on both sides.
+    """
+
+    def __init__(self, channels: int, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.channels = int(channels)
+        self.means = torch.nn.Parameter(torch.zeros(1, channels, 1, 1))
+        self.scales = torch.nn.Parameter(torch.ones(1, channels, 1, 1))
+
+    def update(self) -> bool:
+        self._apply_tables(self.scales)
+        return True
+
+    def forward(self, x: Tensor, training: bool | None = None) -> tuple[Tensor, Tensor]:
+        if training is None:
+            training = self.training
+
+        res = x - self.means
+        if training:
+            x_hat = ste_round(res) + self.means
+            return x_hat, self.likelihood(self.quantize_noise(res), self.scales)
+
+        symbols = torch.round(res)
+        return symbols + self.means, self.likelihood(symbols, self.scales)
+
+    def build_indexes(self, size: tuple[int, ...]) -> Tensor:
+        dims = len(size)
+        batch, channels = size[0], size[1]
+
+        view_dims = [1] * dims
+        view_dims[1] = -1
+        indexes = torch.arange(channels).view(*view_dims)
+
+        return indexes.repeat(batch, 1, *size[2:]).int()
+
+    def _get_means(self, batch: int) -> Tensor:
+        return self.means.detach().expand(batch, self.channels, 1, 1)
+
+    def compress(self, x: Tensor) -> list[bytes]:
+        indexes = self.build_indexes(x.size())
+        return super().compress(x, indexes, self._get_means(x.size(0)))
+
+    def decompress(self, strings: list[bytes], size: tuple[int, ...]) -> Tensor:
+        batch = len(strings)
+        output_size = (batch, self.channels, *size)
+        indexes = self.build_indexes(output_size).to(self._quantized_cdf.device)
+        return super().decompress(strings, indexes, torch.float32, self._get_means(batch))
+
+
+class GGMConditional(GGMEntropyModel):
+    r"""Per-pixel generalized-normal conditional model, indexed by a scale table.
+
+    The progressive scheme codes every context step of an image into one rANS
+    stream, so coding is exposed as an accumulate-then-flush `compress_parts`
+    and a resumable decoder handle per image (`open_streams` + one
+    `decompress_part` call per context step).
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.register_buffer("scale_table", torch.Tensor())
+
+    def update_scale_table(self, scale_table: Tensor) -> bool:
+        self.scale_table = scale_table
+        return self.update()
+
+    def update(self) -> bool:
+        if self.scale_table.numel() == 0:
+            raise ValueError("No scale table. Run update_scale_table() first")
+        self._apply_tables(self.scale_table)
+        return True
+
+    def build_indexes(self, scales: Tensor) -> Tensor:
+        table = self.scale_table[:-1].to(scales.device).view(1, 1, 1, 1, -1)
+        return (scales.unsqueeze(-1) > table).sum(-1)
+
+    def likelihoods(self, inputs: Tensor, scales: Tensor,
+                    training: bool | None = None) -> Tensor:
+        if training is None:
+            training = self.training
+        if training:
+            return self.likelihood(self.quantize_noise(inputs), scales)
+        return self.likelihood(torch.round(inputs), scales)
+
+    def _coder_tables(self):
+        cdf_length = self._cdf_length.reshape(-1).int().tolist()
+        cdf = [row[:length] for row, length
+               in zip(self._quantized_cdf.tolist(), cdf_length)]
+        return cdf, cdf_length, self._offset.reshape(-1).int().tolist()
+
+    def compress_parts(self, symbols_list: list[Tensor],
+                       indexes_list: list[Tensor]) -> bytes:
+        encoder = BufferedRansEncoder()
+        cdf, cdf_length, offset = self._coder_tables()
+        for symbols, indexes in zip(symbols_list, indexes_list):
+            encoder.encode_with_indexes(
+                symbols.reshape(-1).int().tolist(),
+                indexes.reshape(-1).int().tolist(),
+                cdf, cdf_length, offset,
+            )
+        return encoder.flush()
+
+    def open_stream(self, string: bytes) -> RansDecoder:
+        decoder = RansDecoder()
+        decoder.set_stream(string)
+        return decoder
+
+    def decompress_part(self, decoder: RansDecoder, indexes: Tensor) -> Tensor:
+        cdf, cdf_length, offset = self._coder_tables()
+        values = decoder.decode_stream(
+            indexes.reshape(-1).int().tolist(), cdf, cdf_length, offset
+        )
+        return torch.tensor(values, device=indexes.device,
+                            dtype=torch.float32).reshape(indexes.size())

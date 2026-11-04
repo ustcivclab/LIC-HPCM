@@ -5,7 +5,6 @@ import torch
 import argparse
 import numpy as np
 from PIL import Image
-from typing import Dict, Any
 import torch.nn.functional as F
 from torchvision.transforms import ToTensor
 from pytorch_msssim import ms_ssim
@@ -50,7 +49,7 @@ def psnr(a: torch.Tensor, b: torch.Tensor, max_val: int = 255):
 
 def compute_metrics(
     org: torch.Tensor, rec: torch.Tensor, max_val: int = 255):
-    metrics: Dict[str, Any] = {}
+    metrics: dict[str, object] = {}
     org = (org * max_val).clamp(0, max_val).round()
     rec = (rec * max_val).clamp(0, max_val).round()
     metrics["psnr"] = psnr(org, rec).item()
@@ -107,7 +106,8 @@ def test(args):
         model = net()
         model.eval()
         model.load_state_dict(checkpoint, strict=False)
-        model.update(get_scale_table(0.12, 64, args.num))
+        model.entropy_bottleneck.update()
+        model.entropy_conditional.update_scale_table(get_scale_table(0.12, 64, args.num))
         model = model.to(device)
 
         bpp_loss = AverageMeter()

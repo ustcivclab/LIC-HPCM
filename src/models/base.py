@@ -1,145 +1,64 @@
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
+from torch import nn
 
-from ..entropy_models.entropy_models import GGM
-from ..utils.utils import _update_registered_buffer
+from ..entropy_models import ste_round, GGMConditional, GGMEntropyBottleneck
+
+# Checkpoints saved before the entropy models were refactored keep the
+# hyperprior parameters at the top level, plus the CDF buffers, which are only
+# derived from them and are rebuilt by update().
+_LEGACY_PARAMS = {
+    "means_hyper": "entropy_bottleneck.means",
+    "scales_hyper": "entropy_bottleneck.scales",
+}
+_LEGACY_PREFIX = "entropy_estimation."
+_LEGACY_BUFFERS = (
+    "scale_table",
+    "quantized_cdf_z",
+    "cdf_length_z",
+    "offset_z",
+    "quantized_cdf_y",
+    "cdf_length_y",
+    "offset_y",
+)
+
 
 class BB(nn.Module):
     def __init__(self, N):
         super().__init__()
-        
-        self.N = int(N)
-        
+
         self.g_a = None
         self.g_s = None
         self.h_a = None
         self.h_s = None
-        
-        self.means_hyper = nn.Parameter(torch.zeros(1,N,1,1))
-        self.scales_hyper = nn.Parameter(torch.ones(1,N,1,1))
+
+        self.entropy_bottleneck = GGMEntropyBottleneck(N)
+        self.entropy_conditional = GGMConditional()
 
         self.mask_for_two_part = {}
         self.mask_for_four_part = {}
         self.mask_for_eight_part = {}
         self.mask_for_rec_s2 = {}
 
-        self.entropy_estimation = GGM()
-        
-        self.init()
-        
-    def init(self):
-        self.register_buffer("scale_table", torch.Tensor())
-        self.register_buffer("quantized_cdf_z", torch.Tensor())
-        self.register_buffer("cdf_length_z", torch.Tensor())
-        self.register_buffer("offset_z", torch.Tensor())
-        self.register_buffer("quantized_cdf_y", torch.Tensor())
-        self.register_buffer("cdf_length_y", torch.Tensor())
-        self.register_buffer("offset_y", torch.Tensor())
-        return True
-    
-    def update(self, scale_table):
-        self.register_buffer("scale_table", scale_table)
-        quantized_cdf, cdf_length, offset = self.entropy_estimation.get_quantized_cdf(self.scales_hyper.detach().view(-1))
-        self.register_buffer("quantized_cdf_z", quantized_cdf)
-        self.register_buffer("cdf_length_z", cdf_length)
-        self.register_buffer("offset_z", offset)
-        quantized_cdf, cdf_length, offset = self.entropy_estimation.get_quantized_cdf(scale_table)
-        self.register_buffer("quantized_cdf_y", quantized_cdf)
-        self.register_buffer("cdf_length_y", cdf_length)
-        self.register_buffer("offset_y", offset)
-        return True
-    
-    def _update_registered_buffers(
-        self,
-        buffer_names,
-        state_dict,
-        policy="resize_if_empty",
-        dtype=torch.int,
-    ):
-        """
-        Update the registered buffers in a module according to the tensors sized
-        in a state_dict.
-        """
-        
-        valid_buffer_names = [n for n, _ in self.named_buffers()]
-        
-        for buffer_name in buffer_names:
-            if buffer_name not in valid_buffer_names:
-                raise ValueError(f'Invalid buffer name "{buffer_name}"')
+    def load_state_dict(self, state_dict, strict=True):
+        """Rename the pre-refactor keys and drop the derived CDF buffers."""
+        state_dict = {k: v for k, v in state_dict.items() if k not in _LEGACY_BUFFERS}
+        for old, new in _LEGACY_PARAMS.items():
+            if old in state_dict:
+                state_dict[new] = state_dict.pop(old)
+        for key in [k for k in state_dict if k.startswith(_LEGACY_PREFIX)]:
+            value = state_dict.pop(key)
+            suffix = key.removeprefix(_LEGACY_PREFIX)
+            for module in ("entropy_bottleneck", "entropy_conditional"):
+                state_dict[f"{module}.{suffix}"] = value
 
-        for buffer_name in buffer_names:
-            _update_registered_buffer(
-                self,
-                buffer_name,
-                f"{buffer_name}",
-                state_dict,
-                policy,
-                dtype,
-            )
-    
-    @staticmethod
-    def build_indexes_z(size):
-        dims = len(size)
-        N = size[0]
-        C = size[1]
-
-        view_dims = np.ones((dims,), dtype=np.int64)
-        view_dims[1] = -1
-        indexes = torch.arange(C).view(*view_dims)
-        indexes = indexes.int()
-
-        return indexes.repeat(N, 1, *size[2:])
-        
-    def build_indexes_conditional(self, scales):
-        device = scales.device
-        scale_table = self.scale_table[:-1].to(device).view(1,1,1,1,-1)
-        scales_expand = scales.unsqueeze(-1)
-        indexes = (scales_expand>scale_table).sum(-1)
-        return indexes
-    
-    @staticmethod
-    def compress_symbols(symbols, indexes, quantized_cdf, cdf_length, offset, encoder):
-        encoder.encode_with_indexes(
-            symbols.reshape(-1).int().tolist(),
-            indexes.reshape(-1).int().tolist(),
-            [row[:int(l)].tolist() for row, l in zip(quantized_cdf, cdf_length)],
-            cdf_length.tolist(),
-            offset.tolist()
-        )
-        return True
-    
-    @staticmethod
-    def decompress_symbols(indexes, quantized_cdf, cdf_length, offset, decoder):
-        values = decoder.decode_stream(
-            indexes.reshape(-1).int().tolist(),
-            [row[:int(l)].tolist() for row, l in zip(quantized_cdf, cdf_length)],
-            cdf_length.tolist(),
-            offset.tolist()
-        )
-        outputs = torch.tensor(
-            values, device=indexes.device, dtype=torch.float32
-        ).reshape(indexes.size())
-        return outputs
-    
-    @staticmethod
-    def ste_round(x):
-        xr = torch.round(x)
-        return (xr - x).detach() + x
-    
-    @staticmethod
-    def add_noise(x):
-        half = float(0.5)
-        noise = torch.empty_like(x).uniform_(-half, half)
-        return x + noise
+        return super().load_state_dict(state_dict, strict)
 
     def process_with_mask(self, y, scales, means, mask):
         scales_hat = scales * mask
         means_hat = means * mask
         y_res = (y - means_hat) * mask
         if self.training:
-            y_q = self.ste_round(y_res)
+            y_q = ste_round(y_res)
         else:
             y_q = torch.round(y_res)
         y_hat = y_q + means_hat
@@ -358,6 +277,3 @@ class BB(nn.Module):
     @staticmethod
     def combine_for_writing_s3(x):
         return sum(x.chunk(8, 1))
-    
-    def load_state_dict(self, state_dict, strict=True):
-        super().load_state_dict(state_dict, strict)
