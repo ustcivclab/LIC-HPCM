@@ -2,8 +2,7 @@ import scipy.stats
 import torch
 import torch.nn as nn
 
-from .bound_ops import LowerBound
-
+from compressai.ops import LowerBound
 from compressai._CXX import pmf_to_quantized_cdf as _pmf_to_quantized_cdf
 
 def pmf_to_quantized_cdf(pmf, precision: int = 16):
