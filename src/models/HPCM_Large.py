@@ -407,22 +407,22 @@ class HPCM(basemodel):
         )
 
         indexes = [self.entropy_conditional.build_indexes(s) for s in scales_hat_write_list]
-        y_string = self.entropy_conditional.compress_parts(y_q_write_list, indexes)
+        y_strings = self.entropy_conditional.compress_parts(y_q_write_list, indexes)
 
-        return {"strings": [y_string, *z_strings], "shape": z.size()[-2:]}
+        return {"strings": [y_strings, z_strings], "shape": z.size()[-2:]}
 
     def decompress(self, strings, shape):
-        z_strings = strings[1:]
+        z_strings = strings[1]
         z_hat = self.entropy_bottleneck.decompress(z_strings, shape)
 
         params = self.h_s(z_hat)
-        stream = self.entropy_conditional.open_stream(strings[0])
+        streams = self.entropy_conditional.open_streams(strings[0])
         y_hat = self.decompress_hpcm(
             params,
             self.y_spatial_prior_adaptor_list_s1, self.y_spatial_prior_s1_s2,
             self.y_spatial_prior_adaptor_list_s2, self.y_spatial_prior_s1_s2,
             self.y_spatial_prior_adaptor_list_s3, self.y_spatial_prior_s3,
-            self.adaptive_params_list, self.context_net, stream,
+            self.adaptive_params_list, self.context_net, streams,
         )
 
         x_hat = self.g_s(y_hat).clamp_(0, 1)
@@ -446,7 +446,7 @@ class HPCM(basemodel):
                                 y_spatial_prior_adaptor_list_s1, y_spatial_prior_s1, 
                                 y_spatial_prior_adaptor_list_s2, y_spatial_prior_s2, 
                                 y_spatial_prior_adaptor_list_s3, y_spatial_prior_s3, 
-                                adaptive_params_list, context_net, stream
+                                adaptive_params_list, context_net, streams
                                 ):
         scales, means = common_params.chunk(2,1)
         dtype = means.dtype
@@ -472,7 +472,7 @@ class HPCM(basemodel):
             if i == 0:
                 scales_r = self.combine_for_writing_s1(scales_s1 * mask_list[i])
                 indexes_r = self.entropy_conditional.build_indexes(scales_r)
-                y_q_r = self.entropy_conditional.decompress_part(stream, indexes_r)
+                y_q_r = self.entropy_conditional.decompress_part(streams, indexes_r)
                 y_hat_curr_step = (torch.cat([y_q_r for _ in range(2)], dim=1) + means_s1) * mask_list[i]
                 y_hat_so_far = y_hat_curr_step
             else:
@@ -482,7 +482,7 @@ class HPCM(basemodel):
                 scales, means = context.chunk(2, 1)
                 scales_r = self.combine_for_writing_s1(scales * mask_list[i])
                 indexes_r = self.entropy_conditional.build_indexes(scales_r)
-                y_q_r = self.entropy_conditional.decompress_part(stream, indexes_r)
+                y_q_r = self.entropy_conditional.decompress_part(streams, indexes_r)
                 y_hat_curr_step = (torch.cat([y_q_r for _ in range(2)], dim=1) + means) * mask_list[i]
                 y_hat_so_far = y_hat_so_far + y_hat_curr_step
         
@@ -510,7 +510,7 @@ class HPCM(basemodel):
             scales, means = context.chunk(2, 1)
             scales_r = self.combine_for_writing_s2(scales * mask_list[i])
             indexes_r = self.entropy_conditional.build_indexes(scales_r)
-            y_q_r = self.entropy_conditional.decompress_part(stream, indexes_r)
+            y_q_r = self.entropy_conditional.decompress_part(streams, indexes_r)
             y_hat_curr_step = (torch.cat([y_q_r for _ in range(4)], dim=1) + means) * mask_list[i]
             y_hat_so_far = y_hat_so_far + y_hat_curr_step
 
@@ -537,7 +537,7 @@ class HPCM(basemodel):
             scales, means = context.chunk(2, 1)
             scales_r = self.combine_for_writing_s3(scales * mask_list[i])
             indexes_r = self.entropy_conditional.build_indexes(scales_r)
-            y_q_r = self.entropy_conditional.decompress_part(stream, indexes_r)
+            y_q_r = self.entropy_conditional.decompress_part(streams, indexes_r)
             y_hat_curr_step = (torch.cat([y_q_r for _ in range(8)], dim=1) + means) * mask_list[i]
             y_hat_so_far = y_hat_so_far + y_hat_curr_step
         

@@ -214,26 +214,35 @@ class GGMConditional(GGMEntropyModel):
         return cdf, cdf_length, self._offset.reshape(-1).int().tolist()
 
     def compress_parts(self, symbols_list: list[Tensor],
-                       indexes_list: list[Tensor]) -> bytes:
-        encoder = BufferedRansEncoder()
+                       indexes_list: list[Tensor]) -> list[bytes]:
+        """Code every context step of one image into a single rANS stream."""
         cdf, cdf_length, offset = self._coder_tables()
-        for symbols, indexes in zip(symbols_list, indexes_list):
-            encoder.encode_with_indexes(
-                symbols.reshape(-1).int().tolist(),
-                indexes.reshape(-1).int().tolist(),
-                cdf, cdf_length, offset,
-            )
-        return encoder.flush()
+        strings = []
+        for parts, index_parts in zip(zip(*symbols_list), zip(*indexes_list)):
+            encoder = BufferedRansEncoder()
+            for symbols, indexes in zip(parts, index_parts):
+                encoder.encode_with_indexes(
+                    symbols.reshape(-1).int().tolist(),
+                    indexes.reshape(-1).int().tolist(),
+                    cdf, cdf_length, offset,
+                )
+            strings.append(encoder.flush())
+        return strings
 
-    def open_stream(self, string: bytes) -> RansDecoder:
-        decoder = RansDecoder()
-        decoder.set_stream(string)
-        return decoder
+    def open_streams(self, strings: list[bytes]) -> list[RansDecoder]:
+        decoders = []
+        for string in strings:
+            decoder = RansDecoder()
+            decoder.set_stream(string)
+            decoders.append(decoder)
+        return decoders
 
-    def decompress_part(self, decoder: RansDecoder, indexes: Tensor) -> Tensor:
+    def decompress_part(self, streams: list[RansDecoder], indexes: Tensor) -> Tensor:
         cdf, cdf_length, offset = self._coder_tables()
-        values = decoder.decode_stream(
-            indexes.reshape(-1).int().tolist(), cdf, cdf_length, offset
-        )
+        values = [
+            stream.decode_stream(
+                part.reshape(-1).int().tolist(), cdf, cdf_length, offset)
+            for stream, part in zip(streams, indexes)
+        ]
         return torch.tensor(values, device=indexes.device,
                             dtype=torch.float32).reshape(indexes.size())

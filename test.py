@@ -149,9 +149,9 @@ def test(args):
             msssim_db = 10 * (torch.log(1 * 1 / (1 - msssim)) / np.log(10)).item()
 
             num_pixels = h*w
-            bpp_img = sum(len(s) for s in out_enc["strings"]) * 8.0 / num_pixels
-            ybpp_img = len(out_enc["strings"][0]) * 8.0 / num_pixels
-            zbpp_img = len(out_enc["strings"][1]) * 8.0 / num_pixels
+            bpp_img = sum(len(s) for strings in out_enc["strings"] for s in strings) * 8.0 / num_pixels
+            ybpp_img = sum(len(s) for s in out_enc["strings"][0]) * 8.0 / num_pixels
+            zbpp_img = sum(len(s) for s in out_enc["strings"][1]) * 8.0 / num_pixels
 
             print('image name:',img_name)
             print(
