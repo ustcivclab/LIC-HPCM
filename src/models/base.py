@@ -75,7 +75,7 @@ class BB(nn.Module):
         curr_mask_str = f"{batch}_{channel}x{width}x{height}"
         with torch.no_grad():
             if curr_mask_str not in self.mask_for_two_part:
-                assert channel % 2 == 0
+                assert not isinstance(channel, int) or channel % 2 == 0
                 m = torch.ones((batch, channel // 2, height, width), dtype=dtype, device=device)
                 m0, m1 = self.get_one_channel_two_parts_mask(height, width, dtype, device)
                 mask_0 = torch.cat((m * m0, m * m1), dim=1)
@@ -114,7 +114,7 @@ class BB(nn.Module):
         curr_mask_str = f"{batch}_{channel}x{width}x{height}"
         with torch.no_grad():
             if curr_mask_str not in self.mask_for_four_part:
-                assert channel % 4 == 0
+                assert not isinstance(channel, int) or channel % 4 == 0
                 m = torch.ones((batch, channel // 4, height, width), dtype=dtype, device=device)
                 m0, m1, m2, m3 = self.get_one_channel_four_parts_mask(height, width, dtype, device)
                 mask_0 = torch.cat((m * m0, m * m1, m * m2, m * m3), dim=1)
@@ -177,7 +177,7 @@ class BB(nn.Module):
         curr_mask_str = f"{batch}_{channel}x{width}x{height}"
         with torch.no_grad():
             if curr_mask_str not in self.mask_for_eight_part:
-                assert channel % 8 == 0
+                assert not isinstance(channel, int) or channel % 8 == 0
                 mask_list = []
                 m = torch.ones((batch, channel // 8, height, width), dtype=dtype, device=device)
                 mask_list_one_channel = self.get_one_channel_eight_parts_mask(height, width, dtype, device)
@@ -198,7 +198,7 @@ class BB(nn.Module):
         return [m.to(device) for m in self.mask_for_eight_part[curr_mask_str]]
     
     def get_mask_for_s1(self, batch, channel, height, width, dtype, device):
-        assert channel % 8 == 0
+        assert not isinstance(channel, int) or channel % 8 == 0
         mask_list = []
         m = torch.ones((batch, channel // 8, height, width), dtype=dtype, device=device)
         mask_list_one_channel = self.get_one_channel_eight_parts_mask_for_s1(height, width, dtype, device)
@@ -212,7 +212,7 @@ class BB(nn.Module):
         curr_mask_str = f"{batch}_{channel}x{width}x{height}"
         with torch.no_grad():
             if curr_mask_str not in self.mask_for_rec_s2:
-                assert channel % 4 == 0
+                assert not isinstance(channel, int) or channel % 4 == 0
                 m = torch.ones((batch, channel // 4, height, width), dtype=dtype, device=device)
                 m0, m1, m2, m3 = self.get_one_channel_four_parts_mask(height, width, dtype, device)
                 mask_0 = m * m0
@@ -223,7 +223,7 @@ class BB(nn.Module):
         return [m.to(device) for m in self.mask_for_rec_s2[curr_mask_str]]
     
     def get_mask_for_s2(self, batch, channel, height, width, dtype, device):
-        assert channel % 8 == 0
+        assert not isinstance(channel, int) or channel % 8 == 0
         mask_list = []
         m = torch.ones((batch, channel // 8, height, width), dtype=dtype, device=device)
         mask_list_one_channel = self.get_one_channel_eight_parts_mask_for_s2(height, width, dtype, device)
