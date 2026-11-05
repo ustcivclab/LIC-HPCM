@@ -3,8 +3,6 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from einops import rearrange
-
 from .base import BB as basemodel
 from ..layers import PConvRB, conv2x2_down, deconv2x2_up, DWConvRB, conv1x1, conv4x4_down, deconv4x4_up
 
@@ -160,8 +158,14 @@ class CrossAttentionCell(nn.Module):
 
     def forward(self, x_t, h_prev):
         x_t_init = x_t
-        x_t = rearrange(x_t, 'b c (w1 p1) (w2 p2)  -> (b w1 w2) c p1 p2', p1=self.window_size, p2=self.window_size)
-        h_prev = rearrange(h_prev, 'b c (w1 p1) (w2 p2)  -> (b w1 w2) c p1 p2', p1=self.window_size, p2=self.window_size)
+        win = self.window_size
+        b, _, h, w = x_t_init.shape
+
+        def to_windows(t):
+            return t.reshape(b, t.shape[1], h // win, win, w // win, win).permute(0, 2, 4, 1, 3, 5).reshape(-1, t.shape[1], win, win)
+
+        x_t = to_windows(x_t)
+        h_prev = to_windows(h_prev)
         batch_size, C, H, W = x_t.size()
         q = self.conv_q(x_t)
         k = self.conv_k(h_prev)
@@ -175,7 +179,7 @@ class CrossAttentionCell(nn.Module):
         attn_weights = F.softmax(attn_scores, dim=-1)
         attn_output = torch.matmul(attn_weights, v)
         attn_output = attn_output.permute(0, 1, 3, 2).contiguous().view(batch_size, self.hidden_dim, H, W)
-        attn_output = rearrange(attn_output, '(b w1 w2) c p1 p2  -> b c (w1 p1) (w2 p2)', w1=x_t_init.shape[2]//self.window_size, w2=x_t_init.shape[3]//self.window_size)
+        attn_output = attn_output.reshape(b, h // win, w // win, self.hidden_dim, win, win).permute(0, 3, 1, 4, 2, 5).reshape(b, self.hidden_dim, h, w)
 
         h_t = attn_output + self.conv_out(x_t_init)
 
