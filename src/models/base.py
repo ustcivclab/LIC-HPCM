@@ -239,16 +239,12 @@ class BB(nn.Module):
         recon_y = torch.zeros((batch, channel, height, width), device=device, dtype=dtype)
         mask = torch.cat([mask_list_s2[i] - mask_list_s1[i] for i in range(len(mask_list_s1))], dim=1)
         mask_rec_s2 = torch.cat(mask_list_rec_s2, dim=1)
-        recon_y[~(mask_rec_s2.bool())] = y[mask.bool()]
-
-        return recon_y
+        return torch.masked_scatter(recon_y, ~(mask_rec_s2.bool()), y[mask.bool()].reshape(-1))
     
     def get_s3_hyper_with_mask(self, common_params, mask_list, batch, channel, height, width, dtype, device):
         recon_y = torch.zeros((batch, channel, height, width), device=device, dtype=dtype)
         mask = torch.cat(mask_list, dim=1)
-        recon_y[~(mask.bool())] = common_params[~(mask.bool())]
-
-        return recon_y
+        return torch.where(mask.bool(), recon_y, common_params)
     
     def get_s1_s2_with_mask(self, y, mask_list, batch, channel, height, width, reduce):
         y_curr_masked_list = []
@@ -263,8 +259,7 @@ class BB(nn.Module):
     def recon_for_s2_s3(self, y_curr, mask_list, batch, channel, height, width, dtype, device):
         recon_y = torch.zeros((batch, channel, height, width), device=device, dtype=dtype)
         mask = torch.cat(mask_list, dim=1)
-        recon_y[mask.bool()] = y_curr.reshape(-1)
-        return recon_y
+        return torch.masked_scatter(recon_y, mask.bool(), y_curr.reshape(-1))
     
     @staticmethod
     def combine_for_writing_s1(x):
