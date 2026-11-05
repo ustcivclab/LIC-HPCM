@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "lic-hpcm"
 version = "0.0.1"
@@ -8,3 +12,12 @@ dependencies = ["compressai>=1.2.0", "pytorch-msssim", "torchvision", "einops", 
 
 [project.optional-dependencies]
 train = ["tqdm", "tensorboard"]
+
+[tool.setuptools]
+packages = [
+    "lic_hpcm",
+    "lic_hpcm.models",
+    "lic_hpcm.layers",
+    "lic_hpcm.entropy_models",
+]
+package-dir = { lic_hpcm = "src" }
