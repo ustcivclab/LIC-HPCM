@@ -137,7 +137,8 @@ def train_one_epoch(
                 f"\tz bpp: {z_bpp.avg:.4f} |"
                 f'\t time : {t_end:.2f} |'
             )
-            torch.cuda.empty_cache()
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
         
     return global_step
 
@@ -240,7 +241,12 @@ def parse_args(argv):
         default=(256, 256),
         help="Size of the patches to be cropped (default: %(default)s)",
     )
-    parser.add_argument("--cuda", default=True, help="Use cuda")
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cuda" if torch.cuda.is_available() else "cpu",
+        help="Device to train on, e.g. cpu, cuda, cuda:0 (default: %(default)s)",
+    )
     parser.add_argument(
         "--save", action="store_true", default=True, help="Save model to disk"
     )
@@ -291,14 +297,15 @@ def main(argv):
         ])
     )
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = torch.device(args.device)
+    print(f"Using device: {device}")
 
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         shuffle=True,
-        pin_memory=(device == "cuda"),
+        pin_memory=(device.type == "cuda"),
         drop_last=True,
     )
 
@@ -307,7 +314,7 @@ def main(argv):
         batch_size=args.test_batch_size,
         num_workers=8,
         shuffle=False,
-        pin_memory=(device == "cuda"),
+        pin_memory=(device.type == "cuda"),
     )
 
     import importlib
@@ -324,11 +331,12 @@ def main(argv):
 
     last_epoch = 0
 
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = True
+    if device.type == "cuda":
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = True
 
-    if args.cuda and torch.cuda.device_count() > 1:
-        net = CustomDataParallel(net)
+        if torch.cuda.device_count() > 1:
+            net = CustomDataParallel(net)
 
     optimizer = optim.Adam(net.parameters(), lr=1e-4)
     criterion = RateDistortionLoss(lmbda=args.lmbda)
