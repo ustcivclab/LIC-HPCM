@@ -198,7 +198,7 @@ class HPCM(basemodel):
         self.y_spatial_prior_s3 = y_spatial_prior_s3(M)
 
         self.adaptive_params_list = nn.ParameterList([
-            torch.nn.Parameter(torch.ones((1, M*3, 1, 1), device='cuda'), requires_grad=True) for _ in range(10)
+            nn.Parameter(torch.ones((1, M*3, 1, 1)), requires_grad=True) for _ in range(10)
         ])
 
         self.attn_s1 = CrossAttentionCell(320*2, 320*2, window_size=4, kernel_size=1)

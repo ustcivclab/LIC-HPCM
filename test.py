@@ -79,7 +79,10 @@ def get_scale_table(min, max, levels):
     return torch.exp(torch.linspace(math.log(min), math.log(max), levels))
 
 def test(args):
-    device = torch.device("cuda")
+    device = torch.device(args.device)
+    # Enc/dec timing needs a barrier on CUDA, which runs asynchronously; CPU is
+    # already synchronous and synchronize() has no CPU device to act on.
+    sync = torch.cuda.synchronize if device.type == "cuda" else lambda: None
     ##### dataset
     images_list = glob.glob(f'{args.dataset}/*.png')
 
@@ -128,18 +131,18 @@ def test(args):
             x_pad = pad(x, p)
             img_name = img_path.split('/')[-1]
             print(img_name)
-            torch.cuda.synchronize()
+            sync()
             enc_start = time.time()
             with torch.no_grad():
                 out_enc = model.compress(x_pad)
-            torch.cuda.synchronize()
+            sync()
             enc_t = time.time() - enc_start
-            
-            torch.cuda.synchronize()
+
+            sync()
             dec_start = time.time()
             with torch.no_grad():
                 out_dec = model.decompress(out_enc["strings"], out_enc["shape"])
-            torch.cuda.synchronize()
+            sync()
             dec_t = time.time() - dec_start
             x_hat = crop(out_dec["x_hat"], (h,w))
 
@@ -196,6 +199,12 @@ if __name__ == '__main__':
     parser.add_argument("--checkpoint", type=str, help="Path to a checkpoint")
     parser.add_argument("-num", "--num", type=int, default=60)
     parser.add_argument("-data", "--dataset", type=str, default='')
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cuda" if torch.cuda.is_available() else "cpu",
+        help="Device to run on, e.g. cpu, cuda, cuda:0 (default: %(default)s)",
+    )
     args = parser.parse_args()
     print(args)
     test(args)
