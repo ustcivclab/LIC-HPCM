@@ -221,7 +221,7 @@ class HPCM(basemodel):
         z_hat, z_likelihoods = self.entropy_bottleneck(z)
 
         params = self.h_s(z_hat)
-        y_res, y_q, y_hat, scales_y = self.forward_hpcm(y, params, 
+        y_res, y_hat, scales_y = self.forward_hpcm(y, params, 
                                         self.y_spatial_prior_adaptor_list_s1, self.y_spatial_prior_s1_s2, 
                                         self.y_spatial_prior_adaptor_list_s2, self.y_spatial_prior_s1_s2, 
                                         self.y_spatial_prior_adaptor_list_s3, self.y_spatial_prior_s3, 
@@ -263,44 +263,38 @@ class HPCM(basemodel):
         context_next = common_params_s1
 
         mask_list = self.get_mask_two_parts(C, H // 4, W // 4, device)
-        y_res_list_s1 = []
-        y_q_list_s1 = []
+        y_coded_list_s1 = []
         y_hat_list_s1 = []
         scale_list_s1 = []
 
         for i in range(2):
             if i == 0:
-                y_res_0, y_q_0, y_hat_0, s_hat_0 = self.process_with_mask(y_s1, scales_s1, means_s1, mask_list[i])
-                y_res_list_s1.append(y_res_0)
-                y_q_list_s1.append(y_q_0)
-                y_hat_list_s1.append(y_hat_0)
-                scale_list_s1.append(s_hat_0)
+                y_coded, y_hat_step, s_hat = self.process_with_mask(y_s1, scales_s1, means_s1, mask_list[i], write)
             else:
                 y_hat_so_far = torch.sum(torch.stack(y_hat_list_s1), dim=0)
                 params = torch.cat((context_next, y_hat_so_far), dim=1)
                 context = y_spatial_prior_s1(y_spatial_prior_adaptor_list_s1[i - 1](params), adaptive_params_list[i - 1])
                 context_next = self.attn_s1(context, context_next)
                 scales, means = context.chunk(2, 1)
-                y_res_1, y_q_1, y_hat_1, s_hat_1 = self.process_with_mask(y_s1, scales, means, mask_list[i])
-                y_res_list_s1.append(y_res_1)
-                y_q_list_s1.append(y_q_1)
-                y_hat_list_s1.append(y_hat_1)
-                scale_list_s1.append(s_hat_1)
-        
-        y_res = torch.sum(torch.stack(y_res_list_s1), dim=0)
-        y_q = torch.sum(torch.stack(y_q_list_s1), dim=0)
+                y_coded, y_hat_step, s_hat = self.process_with_mask(y_s1, scales, means, mask_list[i], write)
+            y_coded_list_s1.append(y_coded)
+            y_hat_list_s1.append(y_hat_step)
+            scale_list_s1.append(s_hat)
+
         y_hat = torch.sum(torch.stack(y_hat_list_s1), dim=0)
         scales_hat = torch.sum(torch.stack(scale_list_s1), dim=0)
 
         if write:
-            y_q_write_list_s1 = [self.combine_for_writing_s1(y_q_list_s1[i]) for i in range(len(y_q_list_s1))]
-            scales_hat_write_list_s1 = [self.combine_for_writing_s1(scale_list_s1[i]) for i in range(len(scale_list_s1))]
-        
+            y_q_write_list_s1 = [self.combine_for_writing_s1(y_coded) for y_coded in y_coded_list_s1]
+            scales_hat_write_list_s1 = [self.combine_for_writing_s1(s) for s in scale_list_s1]
+        else:
+            y_res = torch.sum(torch.stack(y_coded_list_s1), dim=0)
+
         # up-scaling to s2
-        y_res = self.recon_for_s2_s3(y_res, mask_list_rec_s2)
-        y_q = self.recon_for_s2_s3(y_q, mask_list_rec_s2)
         y_hat = self.recon_for_s2_s3(y_hat, mask_list_rec_s2)
         scales_hat = self.recon_for_s2_s3(scales_hat, mask_list_rec_s2)
+        if not write:
+            y_res = self.recon_for_s2_s3(y_res, mask_list_rec_s2)
 
         context_next_scales, context_next_means = context_next.chunk(2, 1)
         context_next_scales = self.recon_for_s2_s3(context_next_scales, mask_list_rec_s2)
@@ -317,8 +311,7 @@ class HPCM(basemodel):
         context_next = context_net[0](context)
         
         mask_list = self.get_mask_four_parts(C, H // 2, W // 2, device)[1:]
-        y_res_list_s2 = [y_res]
-        y_q_list_s2   = [y_q]
+        y_coded_list_s2 = [] if write else [y_res]
         y_hat_list_s2 = [y_hat]
         scale_list_s2 = [scales_hat]
 
@@ -328,26 +321,25 @@ class HPCM(basemodel):
             context = y_spatial_prior_s2(y_spatial_prior_adaptor_list_s2[i - 1](params), adaptive_params_list[i + 1])
             context_next = self.attn_s2(context, context_next)
             scales, means = context.chunk(2, 1)
-            y_res_1, y_q_1, y_hat_1, s_hat_1 = self.process_with_mask(y_s2, scales, means, mask_list[i])
-            y_res_list_s2.append(y_res_1)
-            y_q_list_s2.append(y_q_1)
-            y_hat_list_s2.append(y_hat_1)
-            scale_list_s2.append(s_hat_1)
-        
-        y_res = torch.sum(torch.stack(y_res_list_s2), dim=0)
-        y_q = torch.sum(torch.stack(y_q_list_s2), dim=0)
+            y_coded, y_hat_step, s_hat = self.process_with_mask(y_s2, scales, means, mask_list[i], write)
+            y_coded_list_s2.append(y_coded)
+            y_hat_list_s2.append(y_hat_step)
+            scale_list_s2.append(s_hat)
+
         y_hat = torch.sum(torch.stack(y_hat_list_s2), dim=0)
         scales_hat = torch.sum(torch.stack(scale_list_s2), dim=0)
 
         if write:
-            y_q_write_list_s2 = [self.combine_for_writing_s2(y_q_list_s2[i]) for i in range(1, len(y_q_list_s2))]
-            scales_hat_write_list_s2 = [self.combine_for_writing_s2(scale_list_s2[i]) for i in range(1, len(scale_list_s2))]
-       
+            y_q_write_list_s2 = [self.combine_for_writing_s2(y_coded) for y_coded in y_coded_list_s2]
+            scales_hat_write_list_s2 = [self.combine_for_writing_s2(s) for s in scale_list_s2[1:]]
+        else:
+            y_res = torch.sum(torch.stack(y_coded_list_s2), dim=0)
+
         # up-scaling to s3
-        y_res = self.recon_for_s2_s3(y_res, mask_list_s2)
-        y_q = self.recon_for_s2_s3(y_q, mask_list_s2)
         y_hat = self.recon_for_s2_s3(y_hat, mask_list_s2)
         scales_hat = self.recon_for_s2_s3(scales_hat, mask_list_s2)
+        if not write:
+            y_res = self.recon_for_s2_s3(y_res, mask_list_s2)
 
         context_next_scales, context_next_means = context_next.chunk(2, 1)
         context_next_scales = self.recon_for_s2_s3(context_next_scales, mask_list_s2)
@@ -363,8 +355,7 @@ class HPCM(basemodel):
         context_next = context_net[1](context)
 
         mask_list = self.get_mask_eight_parts(C, H, W, device)[2:]
-        y_res_list_s3 = [y_res]
-        y_q_list_s3   = [y_q]
+        y_coded_list_s3 = [] if write else [y_res]
         y_hat_list_s3 = [y_hat]
         scale_list_s3 = [scales_hat]
 
@@ -374,24 +365,22 @@ class HPCM(basemodel):
             context = y_spatial_prior_s3(y_spatial_prior_adaptor_list_s3[i - 1](params), adaptive_params_list[i + 4])
             context_next = self.attn_s3(context, context_next)
             scales, means = context.chunk(2, 1)
-            y_res_1, y_q_1, y_hat_1, s_hat_1 = self.process_with_mask(y, scales, means, mask_list[i])
-            y_res_list_s3.append(y_res_1)
-            y_q_list_s3.append(y_q_1)
-            y_hat_list_s3.append(y_hat_1)
-            scale_list_s3.append(s_hat_1)
+            y_coded, y_hat_step, s_hat = self.process_with_mask(y, scales, means, mask_list[i], write)
+            y_coded_list_s3.append(y_coded)
+            y_hat_list_s3.append(y_hat_step)
+            scale_list_s3.append(s_hat)
 
-        y_res = torch.sum(torch.stack(y_res_list_s3), dim=0)
-        y_q = torch.sum(torch.stack(y_q_list_s3), dim=0)
         y_hat = torch.sum(torch.stack(y_hat_list_s3), dim=0)
         scales_hat = torch.sum(torch.stack(scale_list_s3), dim=0)
 
         if write:
-            y_q_write_list_s3 = [self.combine_for_writing_s3(y_q_list_s3[i]) for i in range(1, len(y_q_list_s3))]
-            scales_hat_write_list_s3 = [self.combine_for_writing_s3(scale_list_s3[i]) for i in range(1, len(scale_list_s3))]
+            y_q_write_list_s3 = [self.combine_for_writing_s3(y_coded) for y_coded in y_coded_list_s3]
+            scales_hat_write_list_s3 = [self.combine_for_writing_s3(s) for s in scale_list_s3[1:]]
 
             return y_q_write_list_s1 + y_q_write_list_s2 + y_q_write_list_s3, scales_hat_write_list_s1 + scales_hat_write_list_s2 + scales_hat_write_list_s3
 
-        return y_res, y_q, y_hat, scales_hat
+        y_res = torch.sum(torch.stack(y_coded_list_s3), dim=0)
+        return y_res, y_hat, scales_hat
     
     def compress(self, x):
         y = self.g_a(x)
