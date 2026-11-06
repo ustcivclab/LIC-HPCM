@@ -248,10 +248,10 @@ class HPCM(basemodel):
 
         ############### 2-step scale-1 (s1) (4× downsample) coding
         # get y_s2 first
-        mask_list_s2 = self.get_mask_for_s2(B, C, H, W, dtype, device)
+        mask_list_s2 = self.get_mask_for_s2(B, C, H, W, device)
         y_s2 = self.get_s1_s2_with_mask(y, mask_list_s2, B, C, H // 2, W // 2, reduce=8)
         # get y_s1 from y_s2
-        mask_list_rec_s2 = self.get_mask_for_rec_s2(B, C, H // 2, W // 2, dtype, device)
+        mask_list_rec_s2 = self.get_mask_for_rec_s2(B, C, H // 2, W // 2, device)
         y_s1 = self.get_s1_s2_with_mask(y_s2, mask_list_rec_s2, B, C, H // 4, W // 4, reduce=4)
 
         # get scales_s1 and means_s1, same as getting s1 and s2
@@ -263,7 +263,7 @@ class HPCM(basemodel):
         common_params_s1 = torch.cat((scales_s1, means_s1), dim=1)
         context_next = common_params_s1
 
-        mask_list = self.get_mask_two_parts(B, C, H // 4, W // 4, dtype, device)
+        mask_list = self.get_mask_two_parts(B, C, H // 4, W // 4, device)
         y_res_list_s1 = []
         y_q_list_s1 = []
         y_hat_list_s1 = []
@@ -310,14 +310,14 @@ class HPCM(basemodel):
 
         ############### 4-step scale-2 (s2) (2× downsample) coding
 
-        mask_list_s1 = self.get_mask_for_s1(B, C, H, W, dtype, device)
+        mask_list_s1 = self.get_mask_for_s1(B, C, H, W, device)
         scales_s2 = self.get_s2_hyper_with_mask(scales_all, mask_list_s1, mask_list_s2, mask_list_rec_s2, B, C, H // 2, W // 2, dtype, device)
         means_s2 = self.get_s2_hyper_with_mask(means_all, mask_list_s1, mask_list_s2, mask_list_rec_s2, B, C, H // 2, W // 2, dtype, device)
         common_params_s2 = torch.cat((scales_s2, means_s2), dim=1)
         context += common_params_s2
         context_next = context_net[0](context)
         
-        mask_list = self.get_mask_four_parts(B, C, H // 2, W // 2, dtype, device)[1:]
+        mask_list = self.get_mask_four_parts(B, C, H // 2, W // 2, device)[1:]
         y_res_list_s2 = [y_res]
         y_q_list_s2   = [y_q]
         y_hat_list_s2 = [y_hat]
@@ -363,7 +363,7 @@ class HPCM(basemodel):
         context += common_params_s3
         context_next = context_net[1](context)
 
-        mask_list = self.get_mask_eight_parts(B, C, H, W, dtype, device)[2:]
+        mask_list = self.get_mask_eight_parts(B, C, H, W, device)[2:]
         y_res_list_s3 = [y_res]
         y_q_list_s3   = [y_q]
         y_hat_list_s3 = [y_hat]
@@ -458,8 +458,8 @@ class HPCM(basemodel):
         B, C, H, W = means.size()
 
         ############### 2-step resolution-1 (s1) (4× downsample) coding
-        mask_list_s2 = self.get_mask_for_s2(B, C, H, W, dtype, device)
-        mask_list_rec_s2 = self.get_mask_for_rec_s2(B, C, H // 2, W // 2, dtype, device)
+        mask_list_s2 = self.get_mask_for_s2(B, C, H, W, device)
+        mask_list_rec_s2 = self.get_mask_for_rec_s2(B, C, H // 2, W // 2, device)
 
         # get scales_s1 and means_s1
         scales_all, means_all = common_params.chunk(2,1)
@@ -470,24 +470,24 @@ class HPCM(basemodel):
         common_params_s1 = torch.cat((scales_s1, means_s1), dim=1)
         context_next = common_params_s1
 
-        mask_list = self.get_mask_two_parts(B, C, H // 4, W // 4, dtype, device)
+        mask_list = self.get_mask_two_parts(B, C, H // 4, W // 4, device)
 
         for i in range(2):
             if i == 0:
-                scales_r = self.combine_for_writing_s1(scales_s1 * mask_list[i])
+                scales_r = self.combine_for_writing_s1(torch.where(mask_list[i], scales_s1, 0))
                 indexes_r = self.entropy_conditional.build_indexes(scales_r)
                 y_q_r = self.entropy_conditional.decompress_part(streams, indexes_r)
-                y_hat_curr_step = (torch.cat([y_q_r for _ in range(2)], dim=1) + means_s1) * mask_list[i]
+                y_hat_curr_step = torch.where(mask_list[i], torch.cat([y_q_r for _ in range(2)], dim=1) + means_s1, 0)
                 y_hat_so_far = y_hat_curr_step
             else:
                 params = torch.cat((context_next, y_hat_so_far), dim=1)
                 context = y_spatial_prior_s1(y_spatial_prior_adaptor_list_s1[i - 1](params), adaptive_params_list[i - 1])
                 context_next = self.attn_s1(context, context_next)
                 scales, means = context.chunk(2, 1)
-                scales_r = self.combine_for_writing_s1(scales * mask_list[i])
+                scales_r = self.combine_for_writing_s1(torch.where(mask_list[i], scales, 0))
                 indexes_r = self.entropy_conditional.build_indexes(scales_r)
                 y_q_r = self.entropy_conditional.decompress_part(streams, indexes_r)
-                y_hat_curr_step = (torch.cat([y_q_r for _ in range(2)], dim=1) + means) * mask_list[i]
+                y_hat_curr_step = torch.where(mask_list[i], torch.cat([y_q_r for _ in range(2)], dim=1) + means, 0)
                 y_hat_so_far = y_hat_so_far + y_hat_curr_step
         
         y_hat_so_far = self.recon_for_s2_s3(y_hat_so_far, mask_list_rec_s2, B, C, H // 2, W // 2, dtype, device)
@@ -498,24 +498,24 @@ class HPCM(basemodel):
         context = torch.cat((context_next_scales, context_next_means), dim=1)
 
         ############### 4-step resolution-2 (s2) (2× downsample) coding
-        mask_list_s1 = self.get_mask_for_s1(B, C, H, W, dtype, device)
+        mask_list_s1 = self.get_mask_for_s1(B, C, H, W, device)
         scales_s2 = self.get_s2_hyper_with_mask(scales_all, mask_list_s1, mask_list_s2, mask_list_rec_s2, B, C, H // 2, W // 2, dtype, device)
         means_s2 = self.get_s2_hyper_with_mask(means_all, mask_list_s1, mask_list_s2, mask_list_rec_s2, B, C, H // 2, W // 2, dtype, device)
         common_params_s2 = torch.cat((scales_s2, means_s2), dim=1)
         context += common_params_s2
         context_next = context_net[0](context)
 
-        mask_list = self.get_mask_four_parts(B, C, H // 2, W // 2, dtype, device)[1:]
+        mask_list = self.get_mask_four_parts(B, C, H // 2, W // 2, device)[1:]
 
         for i in range(3):
             params = torch.cat((context_next, y_hat_so_far), dim=1)
             context = y_spatial_prior_s2(y_spatial_prior_adaptor_list_s2[i - 1](params), adaptive_params_list[i + 1])
             context_next = self.attn_s2(context, context_next)
             scales, means = context.chunk(2, 1)
-            scales_r = self.combine_for_writing_s2(scales * mask_list[i])
+            scales_r = self.combine_for_writing_s2(torch.where(mask_list[i], scales, 0))
             indexes_r = self.entropy_conditional.build_indexes(scales_r)
             y_q_r = self.entropy_conditional.decompress_part(streams, indexes_r)
-            y_hat_curr_step = (torch.cat([y_q_r for _ in range(4)], dim=1) + means) * mask_list[i]
+            y_hat_curr_step = torch.where(mask_list[i], torch.cat([y_q_r for _ in range(4)], dim=1) + means, 0)
             y_hat_so_far = y_hat_so_far + y_hat_curr_step
 
         y_hat_so_far = self.recon_for_s2_s3(y_hat_so_far, mask_list_s2, B, C, H, W, dtype, device)
@@ -532,17 +532,17 @@ class HPCM(basemodel):
         context += common_params_s3
         context_next = context_net[1](context)
 
-        mask_list = self.get_mask_eight_parts(B, C, H, W, dtype, device)[2:]
+        mask_list = self.get_mask_eight_parts(B, C, H, W, device)[2:]
 
         for i in range(6):
             params = torch.cat((context_next, y_hat_so_far), dim=1)
             context = y_spatial_prior_s3(y_spatial_prior_adaptor_list_s3[i - 1](params), adaptive_params_list[i + 4])
             context_next = self.attn_s3(context, context_next)
             scales, means = context.chunk(2, 1)
-            scales_r = self.combine_for_writing_s3(scales * mask_list[i])
+            scales_r = self.combine_for_writing_s3(torch.where(mask_list[i], scales, 0))
             indexes_r = self.entropy_conditional.build_indexes(scales_r)
             y_q_r = self.entropy_conditional.decompress_part(streams, indexes_r)
-            y_hat_curr_step = (torch.cat([y_q_r for _ in range(8)], dim=1) + means) * mask_list[i]
+            y_hat_curr_step = torch.where(mask_list[i], torch.cat([y_q_r for _ in range(8)], dim=1) + means, 0)
             y_hat_so_far = y_hat_so_far + y_hat_curr_step
         
         y_hat = y_hat_so_far
