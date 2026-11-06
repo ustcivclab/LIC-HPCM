@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-from ..entropy_models import ste_round, GGMConditional, GGMEntropyBottleneck
+from ..entropy_models import GGMConditional, GGMEntropyBottleneck
 
 # Checkpoints saved before the entropy models were refactored keep the
 # hyperprior parameters at the top level, plus the CDF buffers, which are only
@@ -54,15 +54,14 @@ class BB(nn.Module):
         return super().load_state_dict(state_dict, strict)
 
     def process_with_mask(self, y, scales, means, mask):
-        scales_hat = torch.where(mask, scales, 0.0)
-        means_hat = torch.where(mask, means, 0.0)
-        y_res = torch.where(mask, y - means_hat, 0.0)
-        if self.training:
-            y_q = ste_round(y_res)
-        else:
-            y_q = torch.round(y_res)
-        y_hat = y_q + means_hat
-        return y_res, y_q, y_hat, scales_hat
+        y_q = self.entropy_conditional(y, means)
+        y_hat = y_q + means
+        return (
+            torch.where(mask, y - means, 0.0),
+            torch.where(mask, y_q, 0.0),
+            torch.where(mask, y_hat, 0.0),
+            torch.where(mask, scales, 0.0),
+        )
     
     def get_one_channel_two_parts_mask(self, height, width, device):
         micro_mask = torch.tensor(((1, 0), (0, 1)), dtype=torch.bool, device=device)

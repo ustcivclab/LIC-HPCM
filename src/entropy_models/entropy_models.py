@@ -199,6 +199,16 @@ class GGMConditional(GGMEntropyModel):
         table = self.scale_table[:-1].to(scales.device).view(1, 1, 1, 1, -1)
         return (scales.unsqueeze(-1) > table).sum(-1)
 
+    def forward(self, x: Tensor, means: Tensor | None = None,
+                training: bool | None = None) -> Tensor:
+        """Round x onto the integer grid, relative to means when given."""
+        if training is None:
+            training = self.training
+        res = x - means if means is not None else x
+        if training:
+            return ste_round(res)
+        return torch.round(res)
+
     def likelihoods(self, inputs: Tensor, scales: Tensor,
                     training: bool | None = None) -> Tensor:
         if training is None:
