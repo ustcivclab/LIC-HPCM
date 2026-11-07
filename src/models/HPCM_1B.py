@@ -404,8 +404,8 @@ class HPCM(basemodel):
 
         ############### 8-step resolution-3 (s3) coding
 
-        scales_s3 = self.get_s3_hyper_with_mask(scales_all, mask_list_s2, B, C, H, W, dtype, device)
-        means_s3 = self.get_s3_hyper_with_mask(means_all, mask_list_s2, B, C, H, W, dtype, device)
+        scales_s3 = self.get_s3_hyper_with_mask(scales_all, mask_list_s2)
+        means_s3 = self.get_s3_hyper_with_mask(means_all, mask_list_s2)
         common_params_s3 = torch.cat((scales_s3, means_s3), dim=1)
         context += common_params_s3
         context = context_net[1](context)
@@ -540,8 +540,8 @@ class HPCM(basemodel):
         context_next = torch.cat((context_next_scales, context_next_means), dim=1)
 
         ############### 6-step scale-3 (s3) coding
-        scales_s3 = self.get_s3_hyper_with_mask(scales_all, mask_list_s2, B, C, H, W, dtype, device)
-        means_s3 = self.get_s3_hyper_with_mask(means_all, mask_list_s2, B, C, H, W, dtype, device)
+        scales_s3 = self.get_s3_hyper_with_mask(scales_all, mask_list_s2)
+        means_s3 = self.get_s3_hyper_with_mask(means_all, mask_list_s2)
         common_params_s3 = torch.cat((scales_s3, means_s3), dim=1)
         context_next = context_next + common_params_s3
         context_next = context_net[1](context_next)

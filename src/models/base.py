@@ -228,10 +228,8 @@ class BB(nn.Module):
         mask_rec_s2 = torch.cat(mask_list_rec_s2, dim=1)
         return torch.masked_scatter(recon_y, ~mask_rec_s2, y[mask].reshape(-1))
     
-    def get_s3_hyper_with_mask(self, common_params, mask_list, batch, channel, height, width, dtype, device):
-        recon_y = torch.zeros((batch, channel, height, width), device=device, dtype=dtype)
-        mask = torch.cat(mask_list, dim=1)
-        return torch.where(mask, recon_y, common_params)
+    def get_s3_hyper_with_mask(self, common_params, mask_list):
+        return common_params.masked_fill(torch.cat(mask_list, dim=1), 0.0)
     
     def get_s1_s2_with_mask(self, y, mask_list):
         reduce = len(mask_list)
