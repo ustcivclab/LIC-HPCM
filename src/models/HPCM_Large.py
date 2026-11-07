@@ -247,10 +247,10 @@ class HPCM(basemodel):
 
         ############### 2-step scale-1 (s1) (4× downsample) coding
         # get y_s2 first
-        mask_list_s2 = self.get_mask_for_s2(C, H, W, device)
+        mask_list_s2 = self.get_mask_for_s2(H, W, device)
         y_s2 = self.get_s1_s2_with_mask(y, mask_list_s2)
         # get y_s1 from y_s2
-        mask_list_rec_s2 = self.get_mask_for_rec_s2(C, H // 2, W // 2, device)
+        mask_list_rec_s2 = self.get_mask_for_rec_s2(H // 2, W // 2, device)
         y_s1 = self.get_s1_s2_with_mask(y_s2, mask_list_rec_s2)
 
         # get scales_s1 and means_s1, same as getting s1 and s2
@@ -309,7 +309,7 @@ class HPCM(basemodel):
 
         ############### 4-step scale-2 (s2) (2× downsample) coding
 
-        mask_list_s1 = self.get_mask_for_s1(C, H, W, device)
+        mask_list_s1 = self.get_mask_for_s1(H, W, device)
         scales_s2 = self.get_s2_hyper_with_mask(scales_all, mask_list_s1, mask_list_s2, mask_list_rec_s2)
         means_s2 = self.get_s2_hyper_with_mask(means_all, mask_list_s1, mask_list_s2, mask_list_rec_s2)
         common_params_s2 = torch.cat((scales_s2, means_s2), dim=1)
@@ -456,8 +456,8 @@ class HPCM(basemodel):
         B, C, H, W = means.size()
 
         ############### 2-step resolution-1 (s1) (4× downsample) coding
-        mask_list_s2 = self.get_mask_for_s2(C, H, W, device)
-        mask_list_rec_s2 = self.get_mask_for_rec_s2(C, H // 2, W // 2, device)
+        mask_list_s2 = self.get_mask_for_s2(H, W, device)
+        mask_list_rec_s2 = self.get_mask_for_rec_s2(H // 2, W // 2, device)
 
         # get scales_s1 and means_s1
         scales_all, means_all = common_params.chunk(2,1)
@@ -496,7 +496,7 @@ class HPCM(basemodel):
         context = torch.cat((context_next_scales, context_next_means), dim=1)
 
         ############### 4-step resolution-2 (s2) (2× downsample) coding
-        mask_list_s1 = self.get_mask_for_s1(C, H, W, device)
+        mask_list_s1 = self.get_mask_for_s1(H, W, device)
         scales_s2 = self.get_s2_hyper_with_mask(scales_all, mask_list_s1, mask_list_s2, mask_list_rec_s2)
         means_s2 = self.get_s2_hyper_with_mask(means_all, mask_list_s1, mask_list_s2, mask_list_rec_s2)
         common_params_s2 = torch.cat((scales_s2, means_s2), dim=1)
