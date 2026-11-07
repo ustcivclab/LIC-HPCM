@@ -222,11 +222,10 @@ class BB(nn.Module):
 
         return mask_list
     
-    def get_s2_hyper_with_mask(self, y, mask_list_s1, mask_list_s2, mask_list_rec_s2, batch, channel, height, width, dtype, device):
-        recon_y = torch.zeros((batch, channel, height, width), device=device, dtype=dtype)
+    def get_s2_hyper_with_mask(self, y, mask_list_s1, mask_list_s2, mask_list_rec_s2):
         mask = torch.cat([mask_list_s2[i] & ~mask_list_s1[i] for i in range(len(mask_list_s1))], dim=1)
         mask_rec_s2 = torch.cat(mask_list_rec_s2, dim=1)
-        return torch.masked_scatter(recon_y, ~mask_rec_s2, y[mask].reshape(-1))
+        return torch.masked_scatter(y.new_zeros(mask_rec_s2.shape), ~mask_rec_s2, y[mask].reshape(-1))
     
     def get_s3_hyper_with_mask(self, common_params, mask_list):
         return common_params.masked_fill(torch.cat(mask_list, dim=1), 0.0)
