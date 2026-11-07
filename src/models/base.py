@@ -239,10 +239,9 @@ class BB(nn.Module):
             for i in range(reduce)
         ], dim=1)
     
-    def recon_for_s2_s3(self, y_curr, mask_list, batch, channel, height, width, dtype, device):
-        recon_y = torch.zeros((batch, channel, height, width), device=device, dtype=dtype)
+    def recon_for_s2_s3(self, y_curr, mask_list):
         mask = torch.cat(mask_list, dim=1)
-        return torch.masked_scatter(recon_y, mask, y_curr.reshape(-1))
+        return torch.masked_scatter(y_curr.new_zeros(mask.shape), mask, y_curr.reshape(-1))
     
     @staticmethod
     def combine_for_writing_s1(x):
