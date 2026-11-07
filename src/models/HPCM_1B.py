@@ -289,7 +289,6 @@ class HPCM(basemodel):
                               y_spatial_prior_adaptor_list_s3, y_spatial_prior_s3, 
                               adaptive_params_list, context_net, write=False):
         B, C, H, W = y.size()
-        dtype = common_params.dtype
         device = common_params.device
 
         ############### 2-step resolution-1 (s1) (4× downsample) coding
@@ -342,14 +341,14 @@ class HPCM(basemodel):
             y_q_write_list_s1 = [self.combine_for_writing_s1(y_q_list_s1[i]) for i in range(len(y_q_list_s1))]
             scales_hat_write_list_s1 = [self.combine_for_writing_s1(scale_list_s1[i]) for i in range(len(scale_list_s1))]
         
-        y_res = self.recon_for_s2_s3(y_res, mask_list_rec_s2, B, C, H // 2, W // 2, dtype, device)
-        y_q = self.recon_for_s2_s3(y_q, mask_list_rec_s2, B, C, H // 2, W // 2, dtype, device)
-        y_hat = self.recon_for_s2_s3(y_hat, mask_list_rec_s2, B, C, H // 2, W // 2, dtype, device)
-        scales_hat = self.recon_for_s2_s3(scales_hat, mask_list_rec_s2, B, C, H // 2, W // 2, dtype, device)
+        y_res = self.recon_for_s2_s3(y_res, mask_list_rec_s2)
+        y_q = self.recon_for_s2_s3(y_q, mask_list_rec_s2)
+        y_hat = self.recon_for_s2_s3(y_hat, mask_list_rec_s2)
+        scales_hat = self.recon_for_s2_s3(scales_hat, mask_list_rec_s2)
 
         context_next_scales, context_next_means = context.chunk(2, 1)
-        context_next_scales = self.recon_for_s2_s3(context_next_scales, mask_list_rec_s2, B, C, H // 2, W // 2, dtype, device)
-        context_next_means = self.recon_for_s2_s3(context_next_means, mask_list_rec_s2, B, C, H // 2, W // 2, dtype, device)
+        context_next_scales = self.recon_for_s2_s3(context_next_scales, mask_list_rec_s2)
+        context_next_means = self.recon_for_s2_s3(context_next_means, mask_list_rec_s2)
         context = torch.cat((context_next_scales, context_next_means), dim=1)
 
         ############### 4-step resolution-2 (s2) (2× downsample) coding
@@ -392,14 +391,14 @@ class HPCM(basemodel):
             y_q_write_list_s2 = [self.combine_for_writing_s2(y_q_list_s2[i]) for i in range(1, len(y_q_list_s2))]
             scales_hat_write_list_s2 = [self.combine_for_writing_s2(scale_list_s2[i]) for i in range(1, len(scale_list_s2))]
        
-        y_res = self.recon_for_s2_s3(y_res, mask_list_s2, B, C, H, W, dtype, device)
-        y_q = self.recon_for_s2_s3(y_q, mask_list_s2, B, C, H, W, dtype, device)
-        y_hat = self.recon_for_s2_s3(y_hat, mask_list_s2, B, C, H, W, dtype, device)
-        scales_hat = self.recon_for_s2_s3(scales_hat, mask_list_s2, B, C, H, W, dtype, device)
+        y_res = self.recon_for_s2_s3(y_res, mask_list_s2)
+        y_q = self.recon_for_s2_s3(y_q, mask_list_s2)
+        y_hat = self.recon_for_s2_s3(y_hat, mask_list_s2)
+        scales_hat = self.recon_for_s2_s3(scales_hat, mask_list_s2)
 
         context_next_scales, context_next_means = context.chunk(2, 1)
-        context_next_scales = self.recon_for_s2_s3(context_next_scales, mask_list_s2, B, C, H, W, dtype, device)
-        context_next_means = self.recon_for_s2_s3(context_next_means, mask_list_s2, B, C, H, W, dtype, device)
+        context_next_scales = self.recon_for_s2_s3(context_next_scales, mask_list_s2)
+        context_next_means = self.recon_for_s2_s3(context_next_means, mask_list_s2)
         context = torch.cat((context_next_scales, context_next_means), dim=1)
 
         ############### 8-step resolution-3 (s3) coding
@@ -466,7 +465,6 @@ class HPCM(basemodel):
                                 adaptive_params_list, context_net, streams
                                 ):
         scales_all, means_all = common_params.chunk(2,1)
-        dtype = means_all.dtype
         device = means_all.device
         B, C, H, W = means_all.size()
 
@@ -502,11 +500,11 @@ class HPCM(basemodel):
                 y_hat_so_far = y_hat_so_far + y_hat_curr_step
 
         # up-scaling to s2
-        y_hat_so_far = self.recon_for_s2_s3(y_hat_so_far, mask_list_rec_s2, B, C, H // 2, W // 2, dtype, device)
+        y_hat_so_far = self.recon_for_s2_s3(y_hat_so_far, mask_list_rec_s2)
 
         context_next_scales, context_next_means = context_next.chunk(2, 1)
-        context_next_scales = self.recon_for_s2_s3(context_next_scales, mask_list_rec_s2, B, C, H // 2, W // 2, dtype, device)
-        context_next_means = self.recon_for_s2_s3(context_next_means, mask_list_rec_s2, B, C, H // 2, W // 2, dtype, device)
+        context_next_scales = self.recon_for_s2_s3(context_next_scales, mask_list_rec_s2)
+        context_next_means = self.recon_for_s2_s3(context_next_means, mask_list_rec_s2)
         context_next = torch.cat((context_next_scales, context_next_means), dim=1)
 
         ############### 4-step scale-2 (s2) (2× downsample) decoding
@@ -532,11 +530,11 @@ class HPCM(basemodel):
             y_hat_so_far = y_hat_so_far + y_hat_curr_step
 
         # up-scaling to s3
-        y_hat_so_far = self.recon_for_s2_s3(y_hat_so_far, mask_list_s2, B, C, H, W, dtype, device)
+        y_hat_so_far = self.recon_for_s2_s3(y_hat_so_far, mask_list_s2)
 
         context_next_scales, context_next_means = context_next.chunk(2, 1)
-        context_next_scales = self.recon_for_s2_s3(context_next_scales, mask_list_s2, B, C, H, W, dtype, device)
-        context_next_means = self.recon_for_s2_s3(context_next_means, mask_list_s2, B, C, H, W, dtype, device)
+        context_next_scales = self.recon_for_s2_s3(context_next_scales, mask_list_s2)
+        context_next_means = self.recon_for_s2_s3(context_next_means, mask_list_s2)
         context_next = torch.cat((context_next_scales, context_next_means), dim=1)
 
         ############### 6-step scale-3 (s3) coding
