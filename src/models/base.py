@@ -66,181 +66,129 @@ class BB(nn.Module):
     
     def get_one_channel_two_parts_mask(self, height, width, device):
         micro_mask = torch.tensor(((1, 0), (0, 1)), dtype=torch.bool, device=device)
-        mask_0 = micro_mask.repeat(height // 2, width // 2)
-        mask_0 = mask_0.unsqueeze(0).unsqueeze(0)
-        mask_1 = ~mask_0
-        return [mask_0, mask_1]
+        mask_0 = micro_mask.repeat(height // 2, width // 2).unsqueeze(0)
+        return torch.stack((mask_0, ~mask_0))
     
-    def get_mask_two_parts(self, batch, channel, height, width, device):
-        curr_mask_str = f"{batch}_{channel}x{width}x{height}"
+    def get_mask_two_parts(self, channel, height, width, device):
+        curr_mask_str = f"{channel}x{width}x{height}"
         if curr_mask_str not in self.mask_for_two_part:
             assert not isinstance(channel, int) or channel % 2 == 0
-            m0, m1 = self.get_one_channel_two_parts_mask(height, width, device)
-            e0 = m0.expand(batch, channel // 2, height, width)
-            e1 = m1.expand(batch, channel // 2, height, width)
-            self.mask_for_two_part[curr_mask_str] = [torch.cat((e0, e1), dim=1), torch.cat((e1, e0), dim=1)]
-        return [m.to(device) for m in self.mask_for_two_part[curr_mask_str]]
+            m = self.get_one_channel_two_parts_mask(height, width, device)
+            m = m.expand(2, channel // 2, height, width)
+            self.mask_for_two_part[curr_mask_str] = torch.stack((
+                torch.cat((m[0], m[1]), dim=0),
+                torch.cat((m[1], m[0]), dim=0),
+            ))
+        return self.mask_for_two_part[curr_mask_str].to(device)
     
     def get_one_channel_four_parts_mask(self, height, width, device):
-        micro_mask_0 = torch.tensor(((1, 0), (0, 0)), dtype=torch.bool, device=device)
-        mask_0 = micro_mask_0.repeat((height + 1) // 2, (width + 1) // 2)
-        mask_0 = mask_0[:height, :width]
-        mask_0 = torch.unsqueeze(mask_0, 0)
-        mask_0 = torch.unsqueeze(mask_0, 0)
+        patterns = (((1, 0), (0, 0)), ((0, 1), (0, 0)), ((0, 0), (1, 0)), ((0, 0), (0, 1)))
+        micro_mask = torch.tensor(patterns, dtype=torch.bool, device=device)
+        mask = micro_mask.repeat(1, (height + 1) // 2, (width + 1) // 2)
+        return mask[:, :height, :width].unsqueeze(1)
 
-        micro_mask_1 = torch.tensor(((0, 1), (0, 0)), dtype=torch.bool, device=device)
-        mask_1 = micro_mask_1.repeat((height + 1) // 2, (width + 1) // 2)
-        mask_1 = mask_1[:height, :width]
-        mask_1 = torch.unsqueeze(mask_1, 0)
-        mask_1 = torch.unsqueeze(mask_1, 0)
-
-        micro_mask_2 = torch.tensor(((0, 0), (1, 0)), dtype=torch.bool, device=device)
-        mask_2 = micro_mask_2.repeat((height + 1) // 2, (width + 1) // 2)
-        mask_2 = mask_2[:height, :width]
-        mask_2 = torch.unsqueeze(mask_2, 0)
-        mask_2 = torch.unsqueeze(mask_2, 0)
-
-        micro_mask_3 = torch.tensor(((0, 0), (0, 1)), dtype=torch.bool, device=device)
-        mask_3 = micro_mask_3.repeat((height + 1) // 2, (width + 1) // 2)
-        mask_3 = mask_3[:height, :width]
-        mask_3 = torch.unsqueeze(mask_3, 0)
-        mask_3 = torch.unsqueeze(mask_3, 0)
-
-        return mask_0, mask_1, mask_2, mask_3
-
-    def get_mask_four_parts(self, batch, channel, height, width, device):
-        curr_mask_str = f"{batch}_{channel}x{width}x{height}"
+    def get_mask_four_parts(self, channel, height, width, device):
+        curr_mask_str = f"{channel}x{width}x{height}"
         if curr_mask_str not in self.mask_for_four_part:
             assert not isinstance(channel, int) or channel % 4 == 0
-            e = [m.expand(batch, channel // 4, height, width) for m in self.get_one_channel_four_parts_mask(height, width, device)]
-            self.mask_for_four_part[curr_mask_str] = [
-                torch.cat((e[0], e[1], e[2], e[3]), dim=1),
-                torch.cat((e[3], e[2], e[1], e[0]), dim=1),
-                torch.cat((e[2], e[3], e[0], e[1]), dim=1),
-                torch.cat((e[1], e[0], e[3], e[2]), dim=1),
-            ]
-        return [m.to(device) for m in self.mask_for_four_part[curr_mask_str]]
+            m = self.get_one_channel_four_parts_mask(height, width, device)
+            m = m.expand(4, channel // 4, height, width)
+            perms = [(0, 1, 2, 3), (3, 2, 1, 0), (2, 3, 0, 1), (1, 0, 3, 2)]
+            self.mask_for_four_part[curr_mask_str] = torch.stack([
+                torch.cat([m[i] for i in perm], dim=0) for perm in perms
+            ])
+        return self.mask_for_four_part[curr_mask_str].to(device)
     
     def get_one_channel_eight_parts_mask(self, height, width, device):
         patten_list = [((1, 0, 0, 0), (0, 0, 0, 0), (0, 0, 1, 0), (0, 0, 0, 0)), ((0, 0, 1, 0), (0, 0, 0, 0), (1, 0, 0, 0), (0, 0, 0, 0)), \
                        ((0, 0, 0, 0), (0, 1, 0, 0), (0, 0, 0, 0), (0, 0, 0, 1)), ((0, 0, 0, 0), (0, 0, 0, 1), (0, 0, 0, 0), (0, 1, 0, 0)), \
                        ((0, 1, 0, 0), (0, 0, 0, 0), (0, 0, 0, 1), (0, 0, 0, 0)), ((0, 0, 0, 1), (0, 0, 0, 0), (0, 1, 0, 0), (0, 0, 0, 0)), \
                        ((0, 0, 0, 0), (1, 0, 0, 0), (0, 0, 0, 0), (0, 0, 1, 0)), ((0, 0, 0, 0), (0, 0, 1, 0), (0, 0, 0, 0), (1, 0, 0, 0))]
-        mask_list = []
-        for i in range(len(patten_list)):
-            micro_mask = torch.tensor(patten_list[i], dtype=torch.bool, device=device)
-            micro_mask = micro_mask.repeat(2, 2)
-            mask = micro_mask.repeat((height + 1) // 8, (width + 1) // 8)
-            mask = mask[:height, :width]
-            mask = torch.unsqueeze(mask, 0)
-            mask = torch.unsqueeze(mask, 0)
-            mask_list.append(mask)
-
-        return mask_list
+        micro_mask = torch.tensor(patten_list, dtype=torch.bool, device=device).repeat(1, 2, 2)
+        mask = micro_mask.repeat(1, (height + 1) // 8, (width + 1) // 8)
+        return mask[:, :height, :width].unsqueeze(1)
     
     def get_one_channel_eight_parts_mask_for_s1(self, height, width, device):
         patten_list = [((1, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0)), ((0, 0, 1, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0)), \
                        ((0, 0, 0, 0), (0, 1, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0)), ((0, 0, 0, 0), (0, 0, 0, 1), (0, 0, 0, 0), (0, 0, 0, 0)), \
                        ((0, 1, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0)), ((0, 0, 0, 1), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0)), \
                        ((0, 0, 0, 0), (1, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0)), ((0, 0, 0, 0), (0, 0, 1, 0), (0, 0, 0, 0), (0, 0, 0, 0))]
-        mask_list = []
-        for i in range(len(patten_list)):
-            micro_mask = torch.tensor(patten_list[i], dtype=torch.bool, device=device)
-            mask = micro_mask.repeat((height + 1) // 4, (width + 1) // 4)
-            mask = mask[:height, :width]
-            mask = torch.unsqueeze(mask, 0)
-            mask = torch.unsqueeze(mask, 0)
-            mask_list.append(mask)
-
-        return mask_list
+        micro_mask = torch.tensor(patten_list, dtype=torch.bool, device=device)
+        mask = micro_mask.repeat(1, (height + 1) // 4, (width + 1) // 4)
+        return mask[:, :height, :width].unsqueeze(1)
     
     def get_one_channel_eight_parts_mask_for_s2(self, height, width, device):
         patten_list = [((1, 0, 0, 0), (0, 0, 0, 0), (0, 0, 1, 0), (0, 0, 0, 0)), ((0, 0, 1, 0), (0, 0, 0, 0), (1, 0, 0, 0), (0, 0, 0, 0)), \
                        ((0, 0, 0, 0), (0, 1, 0, 0), (0, 0, 0, 0), (0, 0, 0, 1)), ((0, 0, 0, 0), (0, 0, 0, 1), (0, 0, 0, 0), (0, 1, 0, 0)), \
                        ((0, 1, 0, 0), (0, 0, 0, 0), (0, 0, 0, 1), (0, 0, 0, 0)), ((0, 0, 0, 1), (0, 0, 0, 0), (0, 1, 0, 0), (0, 0, 0, 0)), \
                        ((0, 0, 0, 0), (1, 0, 0, 0), (0, 0, 0, 0), (0, 0, 1, 0)), ((0, 0, 0, 0), (0, 0, 1, 0), (0, 0, 0, 0), (1, 0, 0, 0))]
-        mask_list = []
-        for i in range(len(patten_list)):
-            micro_mask = torch.tensor(patten_list[i], dtype=torch.bool, device=device)
-            mask = micro_mask.repeat((height + 1) // 4, (width + 1) // 4)
-            mask = mask[:height, :width]
-            mask = torch.unsqueeze(mask, 0)
-            mask = torch.unsqueeze(mask, 0)
-            mask_list.append(mask)
+        micro_mask = torch.tensor(patten_list, dtype=torch.bool, device=device)
+        mask = micro_mask.repeat(1, (height + 1) // 4, (width + 1) // 4)
+        return mask[:, :height, :width].unsqueeze(1)
 
-        return mask_list
-
-    def get_mask_eight_parts(self, batch, channel, height, width, device):
-        curr_mask_str = f"{batch}_{channel}x{width}x{height}"
+    def get_mask_eight_parts(self, channel, height, width, device):
+        curr_mask_str = f"{channel}x{width}x{height}"
         if curr_mask_str not in self.mask_for_eight_part:
             assert not isinstance(channel, int) or channel % 8 == 0
-            mask_list = []
-            e = [m.expand(batch, channel // 8, height, width) for m in self.get_one_channel_eight_parts_mask(height, width, device)]
+            m = self.get_one_channel_eight_parts_mask(height, width, device)
+            m = m.expand(8, channel // 8, height, width)
             cat_list = [
-                [0, 2, 4, 6, 1, 3, 5, 7], 
-                [1, 3, 5, 7, 0, 2, 4, 6], 
-                [2, 4, 6, 0, 3, 5, 7, 1], 
-                [3, 5, 7, 1, 2, 4, 6, 0], 
-                [4, 6, 0, 2, 5, 7, 1, 3], 
-                [5, 7, 1, 3, 4, 6, 0, 2], 
-                [6, 0, 2, 4, 7, 1, 3, 5], 
-                [7, 1, 3, 5, 6, 0, 2, 4], 
+                [0, 2, 4, 6, 1, 3, 5, 7],
+                [1, 3, 5, 7, 0, 2, 4, 6],
+                [2, 4, 6, 0, 3, 5, 7, 1],
+                [3, 5, 7, 1, 2, 4, 6, 0],
+                [4, 6, 0, 2, 5, 7, 1, 3],
+                [5, 7, 1, 3, 4, 6, 0, 2],
+                [6, 0, 2, 4, 7, 1, 3, 5],
+                [7, 1, 3, 5, 6, 0, 2, 4],
             ]
-            for i in range(8):
-                mask_list.append(torch.cat([e[cat_list[i][j]] for j in range(8)], dim=1))
-
-            self.mask_for_eight_part[curr_mask_str] = mask_list
-        return [m.to(device) for m in self.mask_for_eight_part[curr_mask_str]]
+            self.mask_for_eight_part[curr_mask_str] = torch.stack([
+                torch.cat([m[i] for i in perm], dim=0) for perm in cat_list
+            ])
+        return self.mask_for_eight_part[curr_mask_str].to(device)
     
-    def get_mask_for_s1(self, batch, channel, height, width, device):
+    def get_mask_for_s1(self, channel, height, width, device):
         assert not isinstance(channel, int) or channel % 8 == 0
-        mask_list = []
-        mask_list_one_channel = self.get_one_channel_eight_parts_mask_for_s1(height, width, device)
         indices = [0, 2, 4, 6, 1, 3, 5, 7]
-        for i in indices:
-            mask_list.append(mask_list_one_channel[i].expand(batch, channel // 8, height, width))
-
-        return mask_list
+        mask = self.get_one_channel_eight_parts_mask_for_s1(height, width, device)[indices]
+        return mask.expand(8, channel // 8, height, width)
     
-    def get_mask_for_rec_s2(self, batch, channel, height, width, device):
+    def get_mask_for_rec_s2(self, channel, height, width, device):
         assert not isinstance(channel, int) or channel % 4 == 0
         curr_mask_str = f"{width}x{height}"
         if curr_mask_str not in self.mask_for_rec_s2:
             self.mask_for_rec_s2[curr_mask_str] = self.get_one_channel_four_parts_mask(height, width, device)
-        return [m.to(device).expand(batch, channel // 4, height, width) for m in self.mask_for_rec_s2[curr_mask_str]]
+        return self.mask_for_rec_s2[curr_mask_str].to(device).expand(4, channel // 4, height, width)
     
-    def get_mask_for_s2(self, batch, channel, height, width, device):
+    def get_mask_for_s2(self, channel, height, width, device):
         assert not isinstance(channel, int) or channel % 8 == 0
-        mask_list = []
-        mask_list_one_channel = self.get_one_channel_eight_parts_mask_for_s2(height, width, device)
+        mask = self.get_one_channel_eight_parts_mask_for_s2(height, width, device)
+        indices_1 = [0, 2, 4, 6, 1, 3, 5, 7]
+        indices_2 = [1, 3, 5, 7, 0, 2, 4, 6]
+        return (mask[indices_1] | mask[indices_2]).expand(8, channel // 8, height, width)
 
-        indices_1 = [0,2,4,6,1,3,5,7]
-        indices_2 = [1,3,5,7,0,2,4,6]
-        for i in range(8):
-            mask = mask_list_one_channel[indices_1[i]] | mask_list_one_channel[indices_2[i]]
-            mask_list.append(mask.expand(batch, channel // 8, height, width))
-
-        return mask_list
+    @staticmethod
+    def merge_mask_parts(mask):
+        return mask.flatten(0, 1)
     
-    def get_s2_hyper_with_mask(self, y, mask_list_s1, mask_list_s2, mask_list_rec_s2):
-        mask = torch.cat([mask_list_s2[i] & ~mask_list_s1[i] for i in range(len(mask_list_s1))], dim=1)
-        mask_rec_s2 = torch.cat(mask_list_rec_s2, dim=1)
+    def get_s2_hyper_with_mask(self, y, mask_s1, mask_s2, mask_rec_s2):
+        mask = self.merge_mask_parts(mask_s2 & ~mask_s1).expand_as(y)
+        # expand rather than a hand-built shape: a traced shape is an uniterable Proxy
+        mask_rec_s2 = self.merge_mask_parts(mask_rec_s2).expand(y.shape[0], -1, -1, -1)
         return torch.masked_scatter(y.new_zeros(mask_rec_s2.shape), ~mask_rec_s2, y[mask].reshape(-1))
     
-    def get_s3_hyper_with_mask(self, common_params, mask_list):
-        return common_params.masked_fill(torch.cat(mask_list, dim=1), 0.0)
+    def get_s3_hyper_with_mask(self, common_params, mask):
+        return common_params.masked_fill(self.merge_mask_parts(mask), 0.0)
     
-    def get_s1_s2_with_mask(self, y, mask_list):
-        reduce = len(mask_list)
-        chunks = y.chunk(reduce, dim=1)
+    def get_s1_s2_with_mask(self, y, mask):
+        # Every part keeps the same fraction of positions, so a single select
+        # on the merged mask matches the per-part chunks.
+        mask = self.merge_mask_parts(mask)
         batch, height, width = y.shape[0], y.shape[2] // 2, y.shape[3] // 2
-        return torch.cat([
-            chunks[i].masked_select(mask_list[i]).view(batch, -1, height, width)
-            for i in range(reduce)
-        ], dim=1)
+        return y.masked_select(mask).view(batch, -1, height, width)
     
-    def recon_for_s2_s3(self, y_curr, mask_list):
-        mask = torch.cat(mask_list, dim=1)
+    def recon_for_s2_s3(self, y_curr, mask):
+        mask = self.merge_mask_parts(mask).expand(y_curr.shape[0], -1, -1, -1)
         return torch.masked_scatter(y_curr.new_zeros(mask.shape), mask, y_curr.reshape(-1))
     
     @staticmethod
