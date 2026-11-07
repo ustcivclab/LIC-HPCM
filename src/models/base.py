@@ -233,15 +233,14 @@ class BB(nn.Module):
         mask = torch.cat(mask_list, dim=1)
         return torch.where(mask, recon_y, common_params)
     
-    def get_s1_s2_with_mask(self, y, mask_list, batch, channel, height, width, reduce):
-        y_curr_masked_list = []
-        slice = channel // reduce
-        for i in range(reduce):
-            y_curr = y[:, slice * i: slice * (i + 1), :, :]
-            y_curr_masked = y_curr.masked_select(mask_list[i]).view(batch, channel // reduce, height, width)
-            y_curr_masked_list.append(y_curr_masked)
-
-        return torch.cat(y_curr_masked_list, dim=1)
+    def get_s1_s2_with_mask(self, y, mask_list):
+        reduce = len(mask_list)
+        chunks = y.chunk(reduce, dim=1)
+        batch, height, width = y.shape[0], y.shape[2] // 2, y.shape[3] // 2
+        return torch.cat([
+            chunks[i].masked_select(mask_list[i]).view(batch, -1, height, width)
+            for i in range(reduce)
+        ], dim=1)
     
     def recon_for_s2_s3(self, y_curr, mask_list, batch, channel, height, width, dtype, device):
         recon_y = torch.zeros((batch, channel, height, width), device=device, dtype=dtype)

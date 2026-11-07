@@ -189,17 +189,17 @@ class HPCM(basemodel):
         ############### 2-step scale-1 (s1) (4× downsample) coding
         # get y_s2 first
         mask_list_s2 = self.get_mask_for_s2(B, C, H, W, device)
-        y_s2 = self.get_s1_s2_with_mask(y, mask_list_s2, B, C, H // 2, W // 2, reduce=8)
+        y_s2 = self.get_s1_s2_with_mask(y, mask_list_s2)
         # get y_s1 from y_s2
         mask_list_rec_s2 = self.get_mask_for_rec_s2(B, C, H // 2, W // 2, device)
-        y_s1 = self.get_s1_s2_with_mask(y_s2, mask_list_rec_s2, B, C, H // 4, W // 4, reduce=4)
+        y_s1 = self.get_s1_s2_with_mask(y_s2, mask_list_rec_s2)
 
         # get scales_s1 and means_s1, same as getting s1 and s2
         scales_all, means_all = common_params.chunk(2,1)
-        scales_s2 = self.get_s1_s2_with_mask(scales_all, mask_list_s2, B, C, H // 2, W // 2, reduce=8)
-        scales_s1 = self.get_s1_s2_with_mask(scales_s2, mask_list_rec_s2, B, C, H // 4, W // 4, reduce=4)
-        means_s2 = self.get_s1_s2_with_mask(means_all, mask_list_s2, B, C, H // 2, W // 2, reduce=8)
-        means_s1 = self.get_s1_s2_with_mask(means_s2, mask_list_rec_s2, B, C, H // 4, W // 4, reduce=4)
+        scales_s2 = self.get_s1_s2_with_mask(scales_all, mask_list_s2)
+        scales_s1 = self.get_s1_s2_with_mask(scales_s2, mask_list_rec_s2)
+        means_s2 = self.get_s1_s2_with_mask(means_all, mask_list_s2)
+        means_s1 = self.get_s1_s2_with_mask(means_s2, mask_list_rec_s2)
         common_params_s1 = torch.cat((scales_s1, means_s1), dim=1)
         context_next = common_params_s1
 
@@ -400,10 +400,10 @@ class HPCM(basemodel):
 
         # get scales_s1 and means_s1
         scales_all, means_all = common_params.chunk(2,1)
-        scales_s2 = self.get_s1_s2_with_mask(scales_all, mask_list_s2, B, C, H // 2, W // 2, reduce=8)
-        scales_s1 = self.get_s1_s2_with_mask(scales_s2, mask_list_rec_s2, B, C, H // 4, W // 4, reduce=4)
-        means_s2 = self.get_s1_s2_with_mask(means_all, mask_list_s2, B, C, H // 2, W // 2, reduce=8)
-        means_s1 = self.get_s1_s2_with_mask(means_s2, mask_list_rec_s2, B, C, H // 4, W // 4, reduce=4)
+        scales_s2 = self.get_s1_s2_with_mask(scales_all, mask_list_s2)
+        scales_s1 = self.get_s1_s2_with_mask(scales_s2, mask_list_rec_s2)
+        means_s2 = self.get_s1_s2_with_mask(means_all, mask_list_s2)
+        means_s1 = self.get_s1_s2_with_mask(means_s2, mask_list_rec_s2)
         common_params_s1 = torch.cat((scales_s1, means_s1), dim=1)
         context_next = common_params_s1
 
