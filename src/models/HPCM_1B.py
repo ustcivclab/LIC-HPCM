@@ -293,10 +293,10 @@ class HPCM(basemodel):
 
         ############### 2-step resolution-1 (s1) (4× downsample) coding
         # get s2 first
-        mask_list_s2 = self.get_mask_for_s2(B, C, H, W, device)
+        mask_list_s2 = self.get_mask_for_s2(C, H, W, device)
         y_s2 = self.get_s1_s2_with_mask(y, mask_list_s2)
         # get s1 from s2
-        mask_list_rec_s2 = self.get_mask_for_rec_s2(B, C, H // 2, W // 2, device)
+        mask_list_rec_s2 = self.get_mask_for_rec_s2(C, H // 2, W // 2, device)
         y_s1 = self.get_s1_s2_with_mask(y_s2, mask_list_rec_s2)
 
         # same as getting s1 and s2
@@ -308,7 +308,7 @@ class HPCM(basemodel):
         common_params_s1 = torch.cat((scales, means), dim=1)
         context = common_params_s1
 
-        mask_list = self.get_mask_two_parts(B, C, H // 4, W // 4, device)
+        mask_list = self.get_mask_two_parts(C, H // 4, W // 4, device)
         y_res_list_s1 = []
         y_q_list_s1 = []
         y_hat_list_s1 = []
@@ -353,14 +353,14 @@ class HPCM(basemodel):
 
         ############### 4-step resolution-2 (s2) (2× downsample) coding
 
-        mask_list_s1 = self.get_mask_for_s1(B, C, H, W, device)
+        mask_list_s1 = self.get_mask_for_s1(C, H, W, device)
         scales_s2 = self.get_s2_hyper_with_mask(scales_all, mask_list_s1, mask_list_s2, mask_list_rec_s2)
         means_s2 = self.get_s2_hyper_with_mask(means_all, mask_list_s1, mask_list_s2, mask_list_rec_s2)
         common_params_s2 = torch.cat((scales_s2, means_s2), dim=1)
         context += common_params_s2
         context = context_net[0](context)
         
-        mask_list = self.get_mask_four_parts(B, C, H // 2, W // 2, device)[1:]
+        mask_list = self.get_mask_four_parts(C, H // 2, W // 2, device)[1:]
         y_res_list_s2 = []
         y_q_list_s2 = []
         y_hat_list_s2 = []
@@ -409,7 +409,7 @@ class HPCM(basemodel):
         context += common_params_s3
         context = context_net[1](context)
 
-        mask_list = self.get_mask_eight_parts(B, C, H, W, device)[2:]
+        mask_list = self.get_mask_eight_parts(C, H, W, device)[2:]
         y_res_list_s3 = []
         y_q_list_s3 = []
         y_hat_list_s3 = []
@@ -469,8 +469,8 @@ class HPCM(basemodel):
         B, C, H, W = means_all.size()
 
         ############### 2-step scale-1 (s1) (4× downsample) decoding
-        mask_list_s2 = self.get_mask_for_s2(B, C, H, W, device)
-        mask_list_rec_s2 = self.get_mask_for_rec_s2(B, C, H // 2, W // 2, device)
+        mask_list_s2 = self.get_mask_for_s2(C, H, W, device)
+        mask_list_rec_s2 = self.get_mask_for_rec_s2(C, H // 2, W // 2, device)
 
         scales_s2 = self.get_s1_s2_with_mask(scales_all, mask_list_s2)
         scales_s1 = self.get_s1_s2_with_mask(scales_s2, mask_list_rec_s2)
@@ -479,7 +479,7 @@ class HPCM(basemodel):
         common_params_s1 = torch.cat((scales_s1, means_s1), dim=1)
         context_next = common_params_s1
 
-        mask_list = self.get_mask_two_parts(B, C, H // 4, W // 4, device)
+        mask_list = self.get_mask_two_parts(C, H // 4, W // 4, device)
 
         for i in range(2):
             if i == 0:
@@ -508,7 +508,7 @@ class HPCM(basemodel):
         context_next = torch.cat((context_next_scales, context_next_means), dim=1)
 
         ############### 4-step scale-2 (s2) (2× downsample) decoding
-        mask_list_s1 = self.get_mask_for_s1(B, C, H, W, device)
+        mask_list_s1 = self.get_mask_for_s1(C, H, W, device)
 
         scales_s2 = self.get_s2_hyper_with_mask(scales_all, mask_list_s1, mask_list_s2, mask_list_rec_s2)
         means_s2 = self.get_s2_hyper_with_mask(means_all, mask_list_s1, mask_list_s2, mask_list_rec_s2)
@@ -516,7 +516,7 @@ class HPCM(basemodel):
         context_next = context_next + common_params_s2
         context_next = context_net[0](context_next)
 
-        mask_list = self.get_mask_four_parts(B, C, H // 2, W // 2, device)[1:]
+        mask_list = self.get_mask_four_parts(C, H // 2, W // 2, device)[1:]
 
         for i in range(3):
             params = torch.cat((context_next, y_hat_so_far), dim=1)
@@ -544,7 +544,7 @@ class HPCM(basemodel):
         context_next = context_next + common_params_s3
         context_next = context_net[1](context_next)
 
-        mask_list = self.get_mask_eight_parts(B, C, H, W, device)[2:]
+        mask_list = self.get_mask_eight_parts(C, H, W, device)[2:]
 
         for i in range(6):
             params = torch.cat((context_next, y_hat_so_far), dim=1)
