@@ -108,8 +108,8 @@ class y_spatial_prior_s1_s2(nn.Module):
             conv1x1(3*M,2*M),
         )
 
-    def forward(self, x, quant_step):
-        return self.branch_2(self.branch_1(x)*quant_step)
+    def forward(self, x):
+        return self.branch_2(self.branch_1(x))
 
 class y_spatial_prior_s3(nn.Module):
     def __init__(self, M):
@@ -126,8 +126,8 @@ class y_spatial_prior_s3(nn.Module):
             conv1x1(3*M,2*M),
         )
 
-    def forward(self, x, quant_step):
-        return self.branch_2(self.branch_1(x)*quant_step)
+    def forward(self, x):
+        return self.branch_2(self.branch_1(x))
 
 class HPCM(basemodel):
     def __init__(self, M=320, N=256):
@@ -145,10 +145,6 @@ class HPCM(basemodel):
         self.y_spatial_prior_s1_s2 = y_spatial_prior_s1_s2(M)
         self.y_spatial_prior_s3 = y_spatial_prior_s3(M)
 
-        self.adaptive_params_list = nn.ParameterList([
-            nn.Parameter(torch.ones((1, M*3, 1, 1)), requires_grad=True) for _ in range(10)
-        ])
-        
         self.context_net = nn.ModuleList(conv1x1(2*M,2*M) for _ in range(2))
     
     def forward(self, x, training=None):
@@ -165,7 +161,7 @@ class HPCM(basemodel):
                                         self.y_spatial_prior_adaptor_list_s1, self.y_spatial_prior_s1_s2, 
                                         self.y_spatial_prior_adaptor_list_s2, self.y_spatial_prior_s1_s2, 
                                         self.y_spatial_prior_adaptor_list_s3, self.y_spatial_prior_s3, 
-                                        self.adaptive_params_list, self.context_net, 
+                                        self.context_net, 
                                         )
 
         x_hat = self.g_s(y_hat)
@@ -181,7 +177,7 @@ class HPCM(basemodel):
                               y_spatial_prior_adaptor_list_s1, y_spatial_prior_s1, 
                               y_spatial_prior_adaptor_list_s2, y_spatial_prior_s2, 
                               y_spatial_prior_adaptor_list_s3, y_spatial_prior_s3, 
-                              adaptive_params_list, context_net, write=False):
+                              context_net, write=False):
         B, C, H, W = y.size()
         device = common_params.device
 
@@ -213,7 +209,7 @@ class HPCM(basemodel):
             else:
                 y_hat_so_far = torch.sum(torch.stack(y_hat_list_s1), dim=0)
                 params = torch.cat((context_next, y_hat_so_far), dim=1)
-                context_next = y_spatial_prior_s1(y_spatial_prior_adaptor_list_s1[i - 1](params), adaptive_params_list[i - 1])
+                context_next = y_spatial_prior_s1(y_spatial_prior_adaptor_list_s1[i - 1](params))
                 scales, means = context_next.chunk(2, 1)
                 y_coded, y_hat_step, s_hat = self.process_with_mask(y_s1, scales, means, mask_list[i], write)
             y_coded_list_s1.append(y_coded)
@@ -257,7 +253,7 @@ class HPCM(basemodel):
         for i in range(3):
             y_hat_so_far = torch.sum(torch.stack(y_hat_list_s2), dim=0)
             params = torch.cat((context_next, y_hat_so_far), dim=1)
-            context_next = y_spatial_prior_s2(y_spatial_prior_adaptor_list_s2[i - 1](params), adaptive_params_list[i + 1])
+            context_next = y_spatial_prior_s2(y_spatial_prior_adaptor_list_s2[i - 1](params))
             scales, means = context_next.chunk(2, 1)
             y_coded, y_hat_step, s_hat = self.process_with_mask(y_s2, scales, means, mask_list[i], write)
             y_coded_list_s2.append(y_coded)
@@ -300,7 +296,7 @@ class HPCM(basemodel):
         for i in range(6):
             y_hat_so_far = torch.sum(torch.stack(y_hat_list_s3), dim=0)
             params = torch.cat((context_next, y_hat_so_far), dim=1)
-            context_next = y_spatial_prior_s3(y_spatial_prior_adaptor_list_s3[i - 1](params), adaptive_params_list[i + 4])
+            context_next = y_spatial_prior_s3(y_spatial_prior_adaptor_list_s3[i - 1](params))
             scales, means = context_next.chunk(2, 1)
             y_coded, y_hat_step, s_hat = self.process_with_mask(y, scales, means, mask_list[i], write)
             y_coded_list_s3.append(y_coded)
@@ -332,7 +328,7 @@ class HPCM(basemodel):
             self.y_spatial_prior_adaptor_list_s1, self.y_spatial_prior_s1_s2,
             self.y_spatial_prior_adaptor_list_s2, self.y_spatial_prior_s1_s2,
             self.y_spatial_prior_adaptor_list_s3, self.y_spatial_prior_s3,
-            self.adaptive_params_list, self.context_net,
+            self.context_net,
         )
 
         indexes = [self.entropy_conditional.build_indexes(s) for s in scales_hat_write_list]
@@ -351,7 +347,7 @@ class HPCM(basemodel):
             self.y_spatial_prior_adaptor_list_s1, self.y_spatial_prior_s1_s2,
             self.y_spatial_prior_adaptor_list_s2, self.y_spatial_prior_s1_s2,
             self.y_spatial_prior_adaptor_list_s3, self.y_spatial_prior_s3,
-            self.adaptive_params_list, self.context_net, streams,
+            self.context_net, streams,
         )
 
         x_hat = self.g_s(y_hat).clamp_(0, 1)
@@ -362,20 +358,20 @@ class HPCM(basemodel):
                               y_spatial_prior_adaptor_list_s1, y_spatial_prior_s1, 
                               y_spatial_prior_adaptor_list_s2, y_spatial_prior_s2, 
                               y_spatial_prior_adaptor_list_s3, y_spatial_prior_s3, 
-                              adaptive_params_list, context_net
+                              context_net
                               ):
         return self.forward_hpcm(y, common_params, 
                               y_spatial_prior_adaptor_list_s1, y_spatial_prior_s1, 
                               y_spatial_prior_adaptor_list_s2, y_spatial_prior_s2, 
                               y_spatial_prior_adaptor_list_s3, y_spatial_prior_s3, 
-                              adaptive_params_list, context_net, write=True
+                              context_net, write=True
                               )
 
     def decompress_hpcm(self, common_params, 
                                 y_spatial_prior_adaptor_list_s1, y_spatial_prior_s1, 
                                 y_spatial_prior_adaptor_list_s2, y_spatial_prior_s2, 
                                 y_spatial_prior_adaptor_list_s3, y_spatial_prior_s3, 
-                                adaptive_params_list, context_net, streams
+                                context_net, streams
                                 ):
         scales, means = common_params.chunk(2,1)
         device = means.device
@@ -405,7 +401,7 @@ class HPCM(basemodel):
                 y_hat_so_far = y_hat_curr_step
             else:
                 params = torch.cat((context_next, y_hat_so_far), dim=1)
-                context_next = y_spatial_prior_s1(y_spatial_prior_adaptor_list_s1[i - 1](params), adaptive_params_list[i - 1])
+                context_next = y_spatial_prior_s1(y_spatial_prior_adaptor_list_s1[i - 1](params))
                 scales, means = context_next.chunk(2, 1)
                 scales_r = self.combine_for_writing_s1(torch.where(mask_list[i], scales, 0))
                 indexes_r = self.entropy_conditional.build_indexes(scales_r)
@@ -432,7 +428,7 @@ class HPCM(basemodel):
 
         for i in range(3):
             params = torch.cat((context_next, y_hat_so_far), dim=1)
-            context_next = y_spatial_prior_s2(y_spatial_prior_adaptor_list_s2[i - 1](params), adaptive_params_list[i + 1])
+            context_next = y_spatial_prior_s2(y_spatial_prior_adaptor_list_s2[i - 1](params))
             scales, means = context_next.chunk(2, 1)
             scales_r = self.combine_for_writing_s2(torch.where(mask_list[i], scales, 0))
             indexes_r = self.entropy_conditional.build_indexes(scales_r)
@@ -458,7 +454,7 @@ class HPCM(basemodel):
 
         for i in range(6):
             params = torch.cat((context_next, y_hat_so_far), dim=1)
-            context_next = y_spatial_prior_s3(y_spatial_prior_adaptor_list_s3[i - 1](params), adaptive_params_list[i + 4])
+            context_next = y_spatial_prior_s3(y_spatial_prior_adaptor_list_s3[i - 1](params))
             scales, means = context_next.chunk(2, 1)
             scales_r = self.combine_for_writing_s3(torch.where(mask_list[i], scales, 0))
             indexes_r = self.entropy_conditional.build_indexes(scales_r)
