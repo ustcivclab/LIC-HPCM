@@ -195,30 +195,31 @@ class HPCM(basemodel):
 
         mask_list = self.masksample3(torch.ones_like(scales_s1[:1], dtype=torch.bool)).bool()
         y_coded_list_s1 = []
-        y_hat_list_s1 = []
         scale_list_s1 = []
+        y_hat = None
+        scales_hat = None
+        y_res = None
 
         for i in range(2):
             if i == 0:
                 y_coded, y_hat_step, s_hat = self.process_with_mask(y_s1, scales_s1, means_s1, mask_list[i], write)
             else:
-                y_hat_so_far = torch.sum(torch.stack(y_hat_list_s1), dim=0)
+                y_hat_so_far = y_hat
                 params = torch.cat((context_next, y_hat_so_far), dim=1)
                 context_next = y_spatial_prior_s1(y_spatial_prior_adaptor_list_s1[i - 1](params))
                 scales, means = context_next.chunk(2, 1)
                 y_coded, y_hat_step, s_hat = self.process_with_mask(y_s1, scales, means, mask_list[i], write)
-            y_coded_list_s1.append(y_coded)
-            y_hat_list_s1.append(y_hat_step)
+            if write:
+                y_coded_list_s1.append(y_coded)
             scale_list_s1.append(s_hat)
-
-        y_hat = torch.sum(torch.stack(y_hat_list_s1), dim=0)
-        scales_hat = torch.sum(torch.stack(scale_list_s1), dim=0)
+            y_hat = y_hat_step if y_hat is None else y_hat + y_hat_step
+            scales_hat = s_hat if scales_hat is None else scales_hat + s_hat
+            if not write:
+                y_res = y_coded if y_res is None else y_res + y_coded
 
         if write:
             y_q_write_list_s1 = [self.combine_for_writing_s1(y_coded) for y_coded in y_coded_list_s1]
             scales_hat_write_list_s1 = [self.combine_for_writing_s1(s) for s in scale_list_s1]
-        else:
-            y_res = torch.sum(torch.stack(y_coded_list_s1), dim=0)
 
         # up-scaling to s2
         y_hat = self.upsample12(y_hat)
@@ -240,28 +241,26 @@ class HPCM(basemodel):
         context_next = context_net[0](context)
         
         mask_list = self.masksample2(torch.ones_like(scales_s2[:1], dtype=torch.bool)).bool()[1:]
-        y_coded_list_s2 = [] if write else [y_res]
-        y_hat_list_s2 = [y_hat]
+        y_coded_list_s2 = []
         scale_list_s2 = [scales_hat]
 
         for i in range(3):
-            y_hat_so_far = torch.sum(torch.stack(y_hat_list_s2), dim=0)
+            y_hat_so_far = y_hat
             params = torch.cat((context_next, y_hat_so_far), dim=1)
             context_next = y_spatial_prior_s2(y_spatial_prior_adaptor_list_s2[i - 1](params))
             scales, means = context_next.chunk(2, 1)
             y_coded, y_hat_step, s_hat = self.process_with_mask(y_s2, scales, means, mask_list[i], write)
-            y_coded_list_s2.append(y_coded)
-            y_hat_list_s2.append(y_hat_step)
+            if write:
+                y_coded_list_s2.append(y_coded)
             scale_list_s2.append(s_hat)
-
-        y_hat = torch.sum(torch.stack(y_hat_list_s2), dim=0)
-        scales_hat = torch.sum(torch.stack(scale_list_s2), dim=0)
+            y_hat = y_hat + y_hat_step
+            scales_hat = scales_hat + s_hat
+            if not write:
+                y_res = y_res + y_coded
 
         if write:
             y_q_write_list_s2 = [self.combine_for_writing_s2(y_coded) for y_coded in y_coded_list_s2]
             scales_hat_write_list_s2 = [self.combine_for_writing_s2(s) for s in scale_list_s2[1:]]
-        else:
-            y_res = torch.sum(torch.stack(y_coded_list_s2), dim=0)
 
         # up-scaling to s3
         y_hat = self.upsample23(y_hat)
@@ -283,22 +282,22 @@ class HPCM(basemodel):
         context_next = context_net[1](context)
 
         mask_list = self.masksample1(torch.ones_like(scales_all[:1], dtype=torch.bool)).bool()[2:]
-        y_coded_list_s3 = [] if write else [y_res]
-        y_hat_list_s3 = [y_hat]
+        y_coded_list_s3 = []
         scale_list_s3 = [scales_hat]
 
         for i in range(6):
-            y_hat_so_far = torch.sum(torch.stack(y_hat_list_s3), dim=0)
+            y_hat_so_far = y_hat
             params = torch.cat((context_next, y_hat_so_far), dim=1)
             context_next = y_spatial_prior_s3(y_spatial_prior_adaptor_list_s3[i - 1](params))
             scales, means = context_next.chunk(2, 1)
             y_coded, y_hat_step, s_hat = self.process_with_mask(y, scales, means, mask_list[i], write)
-            y_coded_list_s3.append(y_coded)
-            y_hat_list_s3.append(y_hat_step)
+            if write:
+                y_coded_list_s3.append(y_coded)
             scale_list_s3.append(s_hat)
-
-        y_hat = torch.sum(torch.stack(y_hat_list_s3), dim=0)
-        scales_hat = torch.sum(torch.stack(scale_list_s3), dim=0)
+            y_hat = y_hat + y_hat_step
+            scales_hat = scales_hat + s_hat
+            if not write:
+                y_res = y_res + y_coded
 
         if write:
             y_q_write_list_s3 = [self.combine_for_writing_s3(y_coded) for y_coded in y_coded_list_s3]
@@ -306,7 +305,6 @@ class HPCM(basemodel):
 
             return y_q_write_list_s1 + y_q_write_list_s2 + y_q_write_list_s3, scales_hat_write_list_s1 + scales_hat_write_list_s2 + scales_hat_write_list_s3
 
-        y_res = torch.sum(torch.stack(y_coded_list_s3), dim=0)
         return y_res, y_hat, scales_hat
     
     def compress(self, x):
