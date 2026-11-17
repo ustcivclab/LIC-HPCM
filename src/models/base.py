@@ -66,9 +66,10 @@ class BB(nn.Module):
 
     def process_with_mask(self, y, scales, means, mask_sample, i, write=False):
         """One context step: (symbols if write else residual, y_hat, scales_hat)."""
+        y_hat = mask_sample(y, i)
         scales_hat = mask_sample(scales, i)
-        y_res = mask_sample(y - means, i)
         means_hat = mask_sample(means, i)
+        y_res = y_hat - means_hat
         if write:
             y_q = self.entropy_conditional.quantize(y_res, "symbols")
             return y_q, y_q + means_hat, scales_hat
