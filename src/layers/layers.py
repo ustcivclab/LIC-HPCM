@@ -25,10 +25,10 @@ class MaskSample3(Sample):
         ))
         return mask_for_two_part
 
-    def forward(self, y: torch.Tensor) -> torch.Tensor:
+    def forward(self, y: torch.Tensor, i: int) -> torch.Tensor:
         _, C, H, W = y.shape
         mask_list = self.get_mask_two_parts(C, H, W)
-        return torch.where(mask_list, y, 0)
+        return torch.where(mask_list[i], y, 0)
 
 
 class MaskSample1(Sample):
@@ -71,10 +71,10 @@ class MaskSample1(Sample):
         ])
         return mask_for_eight_part
 
-    def forward(self, y: torch.Tensor) -> torch.Tensor:
+    def forward(self, y: torch.Tensor, i: int) -> torch.Tensor:
         _, C, H, W = y.shape
         mask_list = self.get_mask_eight_parts(C, H, W)
-        return torch.where(mask_list, y, 0)
+        return torch.where(mask_list[i], y, 0)
 
 
 class MaskSample2Base(Sample):
@@ -109,10 +109,10 @@ class MaskSample2(MaskSample2Base):
         ])
         return mask_for_four_part
 
-    def forward(self, y: torch.Tensor) -> torch.Tensor:
+    def forward(self, y: torch.Tensor, i: int) -> torch.Tensor:
         _, C, H, W = y.shape
         mask_list = self.get_mask_four_parts(C, H, W)
-        return torch.where(mask_list, y, 0)
+        return torch.where(mask_list[i], y, 0)
 
 
 class Resample(Sample):

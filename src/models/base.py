@@ -64,11 +64,11 @@ class BB(nn.Module):
 
         return super().load_state_dict(state_dict, strict)
 
-    def process_with_mask(self, y, scales, means, mask, write=False):
+    def process_with_mask(self, y, scales, means, mask_sample, i, write=False):
         """One context step: (symbols if write else residual, y_hat, scales_hat)."""
-        scales_hat = torch.where(mask, scales, 0)
-        y_res = torch.where(mask, y - means, 0)
-        means_hat = torch.where(mask, means, 0)
+        scales_hat = mask_sample(scales, i)
+        y_res = mask_sample(y - means, i)
+        means_hat = mask_sample(means, i)
         if write:
             y_q = self.entropy_conditional.quantize(y_res, "symbols")
             return y_q, y_q + means_hat, scales_hat
