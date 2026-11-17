@@ -3,8 +3,8 @@ from torch import nn
 
 from ..entropy_models import GGMConditional, GGMEntropyBottleneck
 from ..layers.layers import (
-    Downsample21,
     Downsample32,
+    Downsample_31,
     Downsample_32,
     MaskSample1,
     MaskSample2,
@@ -22,6 +22,9 @@ _LEGACY_PARAMS = {
     "scales_hyper": "entropy_bottleneck.scales",
 }
 _LEGACY_PREFIX = "entropy_estimation."
+_LEGACY_DOWNSAMPLE_KEYS = {
+    "downsample21.micro_mask": "downsample_31.1.micro_mask",
+}
 _LEGACY_BUFFERS = (
     "scale_table",
     "quantized_cdf_z",
@@ -41,7 +44,7 @@ class BB(nn.Module):
         self.entropy_conditional = GGMConditional()
 
         self.downsample32 = Downsample32()
-        self.downsample21 = Downsample21()
+        self.downsample_31 = Downsample_31()
         self.upsample12 = Upsample12()
         self.upsample23 = Upsample23()
         self.downsample_32 = Downsample_32()
@@ -61,6 +64,13 @@ class BB(nn.Module):
             suffix = key.removeprefix(_LEGACY_PREFIX)
             for module in ("entropy_bottleneck", "entropy_conditional"):
                 state_dict[f"{module}.{suffix}"] = value
+        for old, new in _LEGACY_DOWNSAMPLE_KEYS.items():
+            if old in state_dict and new not in state_dict:
+                state_dict[new] = state_dict.pop(old)
+        if "downsample32.s2_mask" in state_dict:
+            state_dict.setdefault(
+                "downsample_31.0.s2_mask", state_dict["downsample32.s2_mask"]
+            )
 
         return super().load_state_dict(state_dict, strict)
 

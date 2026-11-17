@@ -285,17 +285,13 @@ class HPCM(basemodel):
                               y_spatial_prior_adaptor_list_s3, y_spatial_prior_s3, 
                               context_net, write=False):
         ############### 2-step resolution-1 (s1) (4× downsample) coding
-        # get s2 first
+        y_s1 = self.downsample_31(y)
         y_s2 = self.downsample32(y)
-        # get s1 from s2
-        y_s1 = self.downsample21(y_s2)
 
         # same as getting s1 and s2
         scales_all, means_all = common_params.chunk(2,1)
-        scales_s2 = self.downsample32(scales_all)
-        scales = self.downsample21(scales_s2)
-        means_s2 = self.downsample32(means_all)
-        means = self.downsample21(means_s2)
+        scales = self.downsample_31(scales_all)
+        means = self.downsample_31(means_all)
         common_params_s1 = torch.cat((scales, means), dim=1)
         context = common_params_s1
 
@@ -434,10 +430,8 @@ class HPCM(basemodel):
 
         # get scales_s1 and means_s1
         scales_all, means_all = common_params.chunk(2,1)
-        scales_s2 = self.downsample32(scales_all)
-        scales_s1 = self.downsample21(scales_s2)
-        means_s2 = self.downsample32(means_all)
-        means_s1 = self.downsample21(means_s2)
+        scales_s1 = self.downsample_31(scales_all)
+        means_s1 = self.downsample_31(means_all)
         common_params_s1 = torch.cat((scales_s1, means_s1), dim=1)
         context_next = common_params_s1
 

@@ -191,6 +191,16 @@ class Downsample32(DownsampleBase):
         return self.get_s1_s2_with_mask(y, mask_list_s2)
 
 
+class Downsample_31(Sample):
+    def __init__(self) -> None:
+        super().__init__()
+        self.downsample32 = Downsample32()
+        self.downsample21 = Downsample21()
+
+    def forward(self, y: torch.Tensor) -> torch.Tensor:
+        return self.downsample21(self.downsample32(y))
+
+
 class Upsample23(DownsampleBase):
     def forward(self, y_hat: torch.Tensor) -> torch.Tensor:
         _, _, H, W = y_hat.shape
